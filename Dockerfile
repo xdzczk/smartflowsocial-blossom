@@ -32,9 +32,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 
 COPY package.json pnpm-lock.yaml ./
-# onlyBuiltDependencies in package.json allows better-sqlite3 to run its build script; HUSKY=0 skips husky in prepare
-ENV HUSKY=0
-RUN pnpm install --frozen-lockfile --prod
+# --ignore-scripts skips root "prepare" (husky not installed in prod); onlyBuiltDependencies allows rebuild of better-sqlite3
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts \
+    && pnpm rebuild better-sqlite3
 
 COPY --from=builder /app/build ./build
 
