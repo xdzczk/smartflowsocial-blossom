@@ -4,16 +4,19 @@ FROM node:20.11
 WORKDIR /app
 
 ENV NODE_ENV=production
-COPY ./package*.json .
-RUN npm install
+
+# Install pnpm and dependencies (include devDependencies for build)
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY . .
+RUN pnpm build
 
 EXPOSE 5050
+ENV PORT=5050
+ENV DB_PATH=/data
 
-VOLUME [ "/data" ]
-ENV DB_PATH="/data"
-ENV STORAGE_RATE_USD="0.05"
-ENV LISTENER_RELAYS="wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social,wss://relay.nostrplebs.com,wss://relay.plebstr.com,wss://relay.nostr.band,wss://nostr.wine"
+VOLUME ["/data"]
 
-ENTRYPOINT [ "node", "loader.cjs" ]
+CMD ["node", "./build/index.js"]

@@ -95,7 +95,6 @@ export default [
       "static/**",
       "**/*.config.*",
       "coverage/**",
-      "loader.cjs",
       "declarations.d.ts",
       "index.ts",
       "types.ts",
