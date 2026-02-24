@@ -1,0 +1,6 @@
+# Build and deps
+build
+node_modules
+
+# Static assets (may have non-standard formatting)
+static

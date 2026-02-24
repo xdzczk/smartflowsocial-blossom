@@ -1,4 +1,21 @@
+# Lockfiles - we use pnpm
+bun.lockb
+package-lock.json
+yarn.lock
+
 node_modules
+
+/build
 dist
-.DS_Store
 .env
+
+.DS_Store
+
+# Coverage reports
+/coverage
+/.nyc_output
+
+# Build artifacts
+*.tsbuildinfo
+.tsbuildinfo
+eslint-report.json
