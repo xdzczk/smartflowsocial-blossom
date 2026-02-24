@@ -8,6 +8,7 @@ ENV NODE_ENV=production
 # Install pnpm and dependencies (include devDependencies for build)
 RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 COPY package.json pnpm-lock.yaml ./
+RUN pnpm config set ignore-scripts false
 RUN pnpm install --frozen-lockfile
 
 COPY . .
