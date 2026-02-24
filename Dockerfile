@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+# For arm64 hosts (e.g. Coolify on Raspberry Pi / ARM): build with
+#   docker build --build-arg TARGETPLATFORM=linux/arm64 ...
+# or set TARGETPLATFORM=linux/arm64 in Coolify build args.
 
 # --- Builder: produce the app bundle ---
 FROM node:20.11 AS builder
@@ -14,7 +17,8 @@ COPY . .
 RUN pnpm build
 
 # --- Production: install deps and native addon for this platform ---
-FROM node:20.11
+ARG TARGETPLATFORM=linux/amd64
+FROM --platform=$TARGETPLATFORM node:20.11
 
 WORKDIR /app
 
