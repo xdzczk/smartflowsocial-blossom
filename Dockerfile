@@ -1,6 +1,4 @@
 # syntax=docker/dockerfile:1
-# Optional: set when building for a specific platform (e.g. Coolify on arm64)
-ARG TARGETPLATFORM
 
 # --- Builder: produce the app bundle ---
 FROM node:20.11 AS builder
@@ -16,7 +14,7 @@ COPY . .
 RUN pnpm build
 
 # --- Production: install deps and native addon for this platform ---
-FROM --platform=${TARGETPLATFORM:-linux/amd64} node:20.11
+FROM node:20.11
 
 WORKDIR /app
 
@@ -30,8 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm config set ignore-scripts false \
-    && pnpm install --frozen-lockfile --prod \
+# Install with --ignore-scripts so "prepare" (husky) does not run (husky is dev-only and not installed in prod)
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts \
     && pnpm rebuild better-sqlite3
 
 COPY --from=builder /app/build ./build
