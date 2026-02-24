@@ -2,7 +2,6 @@ import path from "path";
 
 import Sqlite3 from "better-sqlite3";
 
-const DB_DIR = process.env["DB_PATH"] ?? ".";
 const DB_NAME = "blossom";
 
 export interface BlobRow {
@@ -13,19 +12,23 @@ export interface BlobRow {
   created: number;
 }
 
+export interface DatabaseOptions {
+  dbPath: string;
+  nativeBindingsPath?: string;
+}
+
 class Database {
   db: Sqlite3.Database;
 
-  constructor() {
-    const mainPath = path.join(DB_DIR, `${DB_NAME}.db`);
-    this.db = new Sqlite3(mainPath, {
-      nativeBinding: process.env["NATIVE_BINDINGS_PATH"]
-        ? path.join(
-            process.env["NATIVE_BINDINGS_PATH"],
-            `${process.arch === "arm64" ? "arm64" : "x64"}/better_sqlite3.node`
-          )
-        : undefined,
-    });
+  constructor(options: DatabaseOptions) {
+    const mainPath = path.join(options.dbPath, `${DB_NAME}.db`);
+    const nativeBinding = options.nativeBindingsPath
+      ? path.join(
+          options.nativeBindingsPath,
+          `${process.arch === "arm64" ? "arm64" : "x64"}/better_sqlite3.node`
+        )
+      : undefined;
+    this.db = new Sqlite3(mainPath, { nativeBinding });
     this.db.pragma("journal_mode = WAL");
 
     this.db.exec(`
@@ -69,6 +72,20 @@ class Database {
       .prepare(`DELETE FROM blobs WHERE key = ? AND pubkey = ?`)
       .run(key, pubkey);
     return result.changes > 0;
+  }
+
+  /** Returns true if the database is open and responsive (for readiness checks). */
+  ping(): boolean {
+    try {
+      this.db.prepare("SELECT 1").get();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  close(): void {
+    this.db.close();
   }
 }
 

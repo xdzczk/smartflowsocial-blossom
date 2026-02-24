@@ -5,21 +5,28 @@ import {
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 
-const BUCKET = process.env["R2_BUCKET"] ?? "";
-const ENDPOINT = process.env["R2_ENDPOINT"] ?? "";
+import { loadConfig } from "../config.js";
 
 let client: S3Client | null = null;
 
+/** Reset cached client (for tests only). */
+export function __resetR2ClientForTesting(): void {
+  client = null;
+}
+
 export function getR2Client(): S3Client {
-  client ??= new S3Client({
-    region: "auto",
-    endpoint: ENDPOINT,
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: process.env["R2_ACCESS_KEY_ID"] ?? "",
-      secretAccessKey: process.env["R2_SECRET_ACCESS_KEY"] ?? "",
-    },
-  });
+  if (!client) {
+    const { r2 } = loadConfig();
+    client = new S3Client({
+      region: "auto",
+      endpoint: r2.endpoint,
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: r2.accessKeyId,
+        secretAccessKey: r2.secretAccessKey,
+      },
+    });
+  }
   return client;
 }
 
@@ -29,10 +36,11 @@ export async function copyObject(
   contentType: string
 ): Promise<void> {
   const c = getR2Client();
+  const bucket = loadConfig().r2.bucket;
   await c.send(
     new CopyObjectCommand({
-      CopySource: `/${BUCKET}/${sourceKey}`,
-      Bucket: BUCKET,
+      CopySource: `/${bucket}/${sourceKey}`,
+      Bucket: bucket,
       Key: destKey,
       MetadataDirective: "REPLACE",
       ContentType: contentType,
@@ -44,7 +52,7 @@ export async function deleteObject(key: string): Promise<void> {
   const c = getR2Client();
   await c.send(
     new DeleteObjectCommand({
-      Bucket: BUCKET,
+      Bucket: loadConfig().r2.bucket,
       Key: key,
     })
   );
@@ -56,10 +64,11 @@ export async function headObject(key: string): Promise<{
   contentLength?: number;
 }> {
   const c = getR2Client();
+  const bucket = loadConfig().r2.bucket;
   try {
     const out = await c.send(
       new HeadObjectCommand({
-        Bucket: BUCKET,
+        Bucket: bucket,
         Key: key,
       })
     );

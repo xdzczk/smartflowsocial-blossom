@@ -3,17 +3,18 @@
   "type": "module",
   "version": "1.0.0",
   "description": "Minimal Blossom-compatible media gateway for SmartFlowSocial (R2, subscription gating)",
-  "main": "build/server.js",
+  "main": "build/index.js",
   "packageManager": "pnpm@10.27.0",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "build": "esbuild --platform=node --format=cjs ./src/server.ts --outdir=build --bundle --external:better-sqlite3 --external:file-type --external:fsevents",
-    "start": "cross-env NODE_ENV=production node ./build/server.js",
-    "dev": "cross-env NODE_ENV=development esbuild --platform=node --format=cjs ./src/server.ts --outdir=build --bundle --external:better-sqlite3 --external:file-type --external:fsevents --watch",
+    "build": "esbuild --platform=node --format=cjs ./src/index.ts --outdir=build --bundle --external:better-sqlite3 --external:file-type --external:fsevents",
+    "start": "cross-env NODE_ENV=production node ./build/index.js",
+    "dev": "cross-env NODE_ENV=development esbuild --platform=node --format=cjs ./src/index.ts --outdir=build --bundle --external:better-sqlite3 --external:file-type --external:fsevents --watch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
@@ -68,7 +69,8 @@
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vite-tsconfig-paths": "^6.0.3",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.16",
+    "@vitest/coverage-v8": "^4.0.16"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.529.1",

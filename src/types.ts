@@ -17,19 +17,14 @@ export interface BlossomContext {
   verb?: string;
 }
 
-/** API error thrown in route handlers */
-export interface ApiError extends Error {
-  code?: number;
-  message: string;
-}
-
 /** Express app instance with CDN extensions */
 export interface AppInstance {
   db: Database;
 }
 
-/** Request with app and optional blossom (override Express Request.app) */
+/** Request with app, optional blossom, and request ID (override Express Request.app) */
 export type AppRequest = Omit<Request, "app"> & {
   app: AppInstance;
   blossom?: BlossomContext;
+  id?: string;
 };

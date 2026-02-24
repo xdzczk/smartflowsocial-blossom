@@ -7,10 +7,12 @@ import { Upload } from "@aws-sdk/lib-storage";
 import type { Response } from "express";
 import { fileTypeFromStream } from "file-type";
 
+import { loadConfig } from "../config.js";
+import { ApiError } from "../errors.js";
+import { log } from "../logger.js";
 import * as storage from "../services/storage.js";
 import { verifySubscription } from "../services/subscription.js";
 import type { AppRequest } from "../types.js";
-import type { ApiError } from "../types.js";
 import { isAllowedMime, getExtension, getType } from "../utils/mime.js";
 
 const TEMP_DIR = "/tmp/sfs-blossom";
@@ -23,44 +25,42 @@ export default async function upload(
   let tempPath: string | undefined;
   let tempKey: string | undefined;
   let bytesRead = 0;
+  const config = loadConfig();
   const client = storage.getR2Client();
-  const bucket = process.env["R2_BUCKET"] ?? "";
+  const bucket = config.r2.bucket;
 
   try {
     if (req.blossom?.verb !== "upload") {
-      throw { code: 401, message: "Expected t tag value 'upload'" } as ApiError;
+      throw new ApiError("Expected t tag value 'upload'", 401);
     }
 
     const contentLength = req.headers["content-length"];
     if (contentLength) {
       const len = parseInt(contentLength, 10);
       if (!isNaN(len) && len > MAX_UPLOAD_BYTES) {
-        throw {
-          code: 413,
-          message: "Payload too large (max 250MB)",
-        } as ApiError;
+        throw new ApiError("Payload too large (max 250MB)", 413);
       }
     }
 
     const active = await verifySubscription(req.blossom.auth.pubkey);
     if (!active) {
-      throw { code: 403, message: "Subscription required" } as ApiError;
+      throw new ApiError("Subscription required", 403);
     }
 
     let expectedHash: string | undefined;
     for (const tag of req.blossom.auth.tags) {
       if (tag[0] === "x") {
         if (expectedHash) {
-          throw { code: 401, message: "Duplicate x tag" } as ApiError;
+          throw new ApiError("Duplicate x tag", 401);
         }
         expectedHash = tag[1];
       }
     }
     if (!expectedHash) {
-      throw {
-        code: 401,
-        message: "A x tag with a content hash is required in the auth header",
-      } as ApiError;
+      throw new ApiError(
+        "A x tag with a content hash is required in the auth header",
+        401
+      );
     }
 
     tempKey = `${crypto.randomBytes(20).toString("hex")}.temp`;
@@ -106,18 +106,18 @@ export default async function upload(
     await uploading.done();
 
     if (bytesRead > MAX_UPLOAD_BYTES) {
-      throw { code: 413, message: "Payload too large (max 250MB)" } as ApiError;
+      throw new ApiError("Payload too large (max 250MB)", 413);
     }
 
     if (!sha256 && savedLocal) {
-      throw { code: 500, message: "Hash not computed" } as ApiError;
+      throw new ApiError("Hash not computed", 500);
     }
 
     if (expectedHash !== sha256) {
-      throw {
-        code: 401,
-        message: "Hash given in x tag does not match detected content hash",
-      } as ApiError;
+      throw new ApiError(
+        "Hash given in x tag does not match detected content hash",
+        401
+      );
     }
 
     let ext: string | null = null;
@@ -156,14 +156,11 @@ export default async function upload(
     }
 
     if (!isAllowedMime(mimeType)) {
-      throw {
-        code: 400,
-        message: "Only image and video types are allowed",
-      } as ApiError;
+      throw new ApiError("Only image and video types are allowed", 400);
     }
 
     if (sha256 === undefined) {
-      throw { code: 500, message: "Hash not computed" } as ApiError;
+      throw new ApiError("Hash not computed", 500);
     }
     const finalKey = ext ? `${sha256}.${ext}` : sha256;
     await storage.copyObject(tempKey, finalKey, mimeType);
@@ -180,9 +177,7 @@ export default async function upload(
 
     await storage.deleteObject(tempKey);
 
-    const publicUrl =
-      process.env["BLOSSOM_PUBLIC_URL"] ?? "https://blossom.smartflow.social";
-    const url = `${publicUrl.replace(/\/$/, "")}/${finalKey}`;
+    const url = `${config.blossomPublicUrl.replace(/\/$/, "")}/${finalKey}`;
 
     res.json({
       url,
@@ -191,18 +186,26 @@ export default async function upload(
       m: mimeType,
     });
   } catch (err) {
-    const e = err as ApiError & { message?: string };
     if (bytesRead > MAX_UPLOAD_BYTES) {
-      res.status(413).json({ message: "Payload too large (max 250MB)" });
-      return;
+      throw new ApiError("Payload too large (max 250MB)", 413);
     }
-    res.status(e.code ?? 500).json({ message: e.message ?? "Unknown Error" });
+    throw err;
   } finally {
     if (tempPath) {
-      await fs.promises.unlink(tempPath).catch(() => {});
+      await fs.promises.unlink(tempPath).catch((err: unknown) => {
+        log.warn("Upload cleanup: failed to unlink temp file", {
+          tempPath,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
     if (tempKey) {
-      await storage.deleteObject(tempKey).catch(() => {});
+      await storage.deleteObject(tempKey).catch((err: unknown) => {
+        log.warn("Upload cleanup: failed to delete temp object", {
+          tempKey,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
   }
 }

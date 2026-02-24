@@ -1,16 +1,16 @@
-const SFS_URL = process.env["SFS_INTERNAL_URL"] ?? "";
-const SFS_SECRET = process.env["SFS_INTERNAL_SECRET"] ?? "";
+import { loadConfig } from "../config.js";
 
 export async function verifySubscription(pubkey: string): Promise<boolean> {
-  if (!SFS_URL || !SFS_SECRET) {
+  const { sfs } = loadConfig();
+  if (!sfs.internalUrl || !sfs.internalSecret) {
     return false;
   }
-  const url = `${SFS_URL.replace(/\/$/, "")}/internal/subscription-status?pubkey=${encodeURIComponent(pubkey)}`;
+  const url = `${sfs.internalUrl.replace(/\/$/, "")}/internal/subscription-status?pubkey=${encodeURIComponent(pubkey)}`;
   try {
     const res = await fetch(url, {
       method: "GET",
       headers: {
-        "x-internal-secret": SFS_SECRET,
+        "x-internal-secret": sfs.internalSecret,
       },
     });
     if (!res.ok) return false;
