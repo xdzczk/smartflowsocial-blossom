@@ -174,8 +174,9 @@ export async function start(): Promise<void> {
 
   app.use(errorHandler);
 
-  const server = app.listen(config.port, () => {
-    log.info("Listening", { port: config.port });
+  const host = process.env.HOST?.trim() || "0.0.0.0";
+  const server = app.listen(config.port, host, () => {
+    log.info("Listening", { host, port: config.port });
   });
 
   function shutdown(signal: string): void {
