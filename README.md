@@ -22,23 +22,25 @@ pnpm start
 
 ## Environment variables
 
-| Variable                 | Required | Default                            | Description                                                                           |
-| ------------------------ | -------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
-| `DB_PATH`                | Yes      | —                                  | Directory for the SQLite database file                                                |
-| `R2_BUCKET`              | Yes      | —                                  | R2 bucket name                                                                        |
-| `R2_ENDPOINT`            | Yes      | —                                  | R2 endpoint URL (e.g. `https://<account>.r2.cloudflarestorage.com`)                   |
-| `R2_ACCESS_KEY_ID`       | Yes      | —                                  | R2 access key ID                                                                      |
-| `R2_SECRET_ACCESS_KEY`   | Yes      | —                                  | R2 secret access key                                                                  |
-| `PORT`                   | No       | `5050`                             | HTTP server port                                                                      |
-| `AUTH_TOLERANCE_SECONDS` | No       | `0`                                | Clock skew tolerance for Blossom auth (seconds)                                       |
-| `BLOSSOM_PUBLIC_URL`     | No       | `https://blossom.smartflow.social` | Base URL returned in upload responses for blob URLs                                   |
-| `SFS_INTERNAL_URL`       | No       | —                                  | SmartFlow internal API base URL for subscription checks                               |
-| `SFS_INTERNAL_SECRET`    | No       | —                                  | Secret for `x-internal-secret` when calling SFS                                       |
-| `NODE_ENV`               | No       | `development`                      | Environment name                                                                      |
-| `NATIVE_BINDINGS_PATH`   | No       | —                                  | Path to directory containing `arm64/` or `x64/better_sqlite3.node` for better-sqlite3 |
+| Variable                 | Required | Default                            | Description                                                                                                               |
+| ------------------------ | -------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PATH`                | Yes      | —                                  | Directory for the SQLite database file                                                                                    |
+| `R2_BUCKET`              | Yes      | —                                  | R2 bucket name                                                                                                            |
+| `R2_ENDPOINT`            | Yes      | —                                  | R2 endpoint URL (e.g. `https://<account>.r2.cloudflarestorage.com`)                                                       |
+| `R2_ACCESS_KEY_ID`       | Yes      | —                                  | R2 access key ID                                                                                                          |
+| `R2_SECRET_ACCESS_KEY`   | Yes      | —                                  | R2 secret access key                                                                                                      |
+| `PORT`                   | No       | `5050`                             | HTTP server port                                                                                                          |
+| `AUTH_TOLERANCE_SECONDS` | No       | `0`                                | Clock skew tolerance for Blossom auth (seconds)                                                                           |
+| `BLOSSOM_PUBLIC_URL`     | No       | `https://blossom.smartflow.social` | Base URL returned in upload responses for blob URLs                                                                       |
+| `SFS_INTERNAL_URL`       | No\*     | —                                  | SmartFlow app base URL for subscription checks (e.g. `https://app.smartflow.social`). Must be reachable from this server. |
+| `SFS_INTERNAL_SECRET`    | No\*     | —                                  | Must match SmartFlow app env `BLOSSOM_INTERNAL_SECRET`. Sent as `x-internal-secret` header.                               |
+| `NODE_ENV`               | No       | `development`                      | Environment name                                                                                                          |
+| `NATIVE_BINDINGS_PATH`   | No       | —                                  | Path to directory containing `arm64/` or `x64/better_sqlite3.node` for better-sqlite3                                     |
 
-If `SFS_INTERNAL_URL` or `SFS_INTERNAL_SECRET` is missing, subscription checks are skipped and
-uploads are rejected (403) unless you change the code.
+For upload gating (SFS Blossom), **both** `SFS_INTERNAL_URL` and `SFS_INTERNAL_SECRET` must be set.
+If either is missing, subscription checks are skipped and all uploads are rejected with 403. The
+server logs the reason (e.g. "Subscription check skipped: SFS_INTERNAL_URL or SFS_INTERNAL_SECRET
+not set", or "SFS returned active false", or fetch error).
 
 ## Operations
 
