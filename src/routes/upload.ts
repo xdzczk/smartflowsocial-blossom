@@ -179,10 +179,13 @@ export default async function upload(
 
     const url = `${config.blossomPublicUrl.replace(/\/$/, "")}/${finalKey}`;
 
+    // Nostrify BlossomUploader expects { url, sha256, size, type }; include x/m for NIP-94 compatibility
     res.json({
       url,
-      x: sha256,
+      sha256,
       size,
+      type: mimeType,
+      x: sha256,
       m: mimeType,
     });
   } catch (err) {
