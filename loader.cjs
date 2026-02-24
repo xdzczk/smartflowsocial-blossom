@@ -1,4 +1,4 @@
-import('./index.js').then(module => {
+import('./dist/index.js').then(module => {
 
   module.start();
 

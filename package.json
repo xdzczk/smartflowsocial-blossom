@@ -3,20 +3,26 @@
   "type": "module",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node loader.cjs"
+    "build": "tsc",
+    "start": "node loader.cjs",
+    "dev": "tsx index.ts"
   },
-  "keywords": [
-    "nostr",
-    "blossom"
-  ],
-  "author": {
-    "name": "Stuart Bowman",
-    "email": "sbowmans@satellite.earth"
-  },
+  "keywords": ["nostr", "blossom"],
+  "author": {"name": "Stuart Bowman", "email": "sbowmans@satellite.earth"},
   "license": "MIT",
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.529.1",
     "@aws-sdk/lib-storage": "^3.529.1",
