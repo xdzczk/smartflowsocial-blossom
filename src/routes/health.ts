@@ -7,7 +7,7 @@ export function createHealthRouter(
 ): express.Router {
   const router = express.Router();
   router.get("/health", (_req, res) => {
-    res.status(200).end();
+    res.status(200).send("OK");
   });
   router.get("/ready", (_req, res) => {
     if (app.db.ping()) {

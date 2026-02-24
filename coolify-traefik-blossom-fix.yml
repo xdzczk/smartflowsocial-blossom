@@ -1,0 +1,18 @@
+# Coolify generated wrong Traefik rule: domain as PathPrefix with empty Host.
+# This file fixes routing for blossom-api.smartflow.social by adding a correct router.
+#
+# Copy to Coolify server: /data/coolify/proxy/dynamic/blossom-api-fix.yml
+# Traefik will pick it up automatically (providers.file.watch=true).
+
+http:
+  routers:
+    blossom-api-by-host:
+      rule: "Host(`blossom-api.smartflow.social`)"
+      service: http-0-r8cg00s0g48g84sg4ks84ww0@docker
+      entryPoints:
+        - http
+    blossom-api-by-host-https:
+      rule: "Host(`blossom-api.smartflow.social`)"
+      service: http-0-r8cg00s0g48g84sg4ks84ww0@docker
+      entryPoints:
+        - https
