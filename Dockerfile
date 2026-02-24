@@ -1,22 +1,40 @@
 # syntax=docker/dockerfile:1
-FROM node:20.11
+# Optional: set when building for a specific platform (e.g. Coolify on arm64)
+ARG TARGETPLATFORM
+
+# --- Builder: produce the app bundle ---
+FROM node:20.11 AS builder
+
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build
+
+# --- Production: install deps and native addon for this platform ---
+FROM --platform=${TARGETPLATFORM:-linux/amd64} node:20.11
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Install pnpm and build tools for native addons (e.g. better-sqlite3)
-RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+# Build tools required for better-sqlite3 native addon (must compile in this stage for target arch)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm config set ignore-scripts false
-RUN pnpm install --frozen-lockfile
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 
-COPY . .
-RUN pnpm build
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm config set ignore-scripts false \
+    && pnpm install --frozen-lockfile --prod \
+    && pnpm rebuild better-sqlite3
+
+COPY --from=builder /app/build ./build
 
 EXPOSE 5050
 ENV PORT=5050
