@@ -32,6 +32,17 @@ export interface Config {
   sfs: {
     internalUrl: string;
     internalSecret: string;
+    uploadTokenSecret: string;
+    commitBatchUrl: string;
+    commitBatchSize: number;
+    commitFlushMs: number;
+  };
+  rateLimit: {
+    uploadsBurst: number;
+    uploadsPerMin: number;
+    bytesBurst: number;
+    bytesPerMin: number;
+    ipUploadsPerMin: number;
   };
   nodeEnv: string;
   nativeBindingsPath: string | undefined;
@@ -65,6 +76,23 @@ export function loadConfig(): Config {
     sfs: {
       internalUrl: optionalEnv("SFS_INTERNAL_URL", ""),
       internalSecret: optionalEnv("SFS_INTERNAL_SECRET", ""),
+      uploadTokenSecret: optionalEnv(
+        "SFS_UPLOAD_TOKEN_SECRET",
+        optionalEnv("SFS_INTERNAL_SECRET", "")
+      ),
+      commitBatchUrl: optionalEnv(
+        "SFS_COMMIT_BATCH_URL",
+        `${optionalEnv("SFS_INTERNAL_URL", "").replace(/\/$/, "")}/internal/blossom/commit-batch`
+      ),
+      commitBatchSize: optionalInt("SFS_COMMIT_BATCH_SIZE", 20),
+      commitFlushMs: optionalInt("SFS_COMMIT_FLUSH_MS", 2000),
+    },
+    rateLimit: {
+      uploadsBurst: optionalInt("RATE_LIMIT_UPLOADS_BURST", 20),
+      uploadsPerMin: optionalInt("RATE_LIMIT_UPLOADS_PER_MIN", 10),
+      bytesBurst: optionalInt("RATE_LIMIT_BYTES_BURST", 500 * 1024 * 1024),
+      bytesPerMin: optionalInt("RATE_LIMIT_BYTES_PER_MIN", 200 * 1024 * 1024),
+      ipUploadsPerMin: optionalInt("RATE_LIMIT_IP_UPLOADS_PER_MIN", 120),
     },
     nodeEnv: optionalEnv("NODE_ENV", "development"),
     nativeBindingsPath:

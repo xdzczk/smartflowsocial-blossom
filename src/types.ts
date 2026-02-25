@@ -17,6 +17,18 @@ export interface BlossomContext {
   verb?: string;
 }
 
+export interface UploadTokenContext {
+  sub: string;
+  sha256: string;
+  size: number;
+  type: string;
+  iat: number;
+  exp: number;
+  jti: string;
+  batchId: string;
+  rateClass?: string;
+}
+
 /** Express app instance with CDN extensions */
 export interface AppInstance {
   db: Database;
@@ -26,5 +38,6 @@ export interface AppInstance {
 export type AppRequest = Omit<Request, "app"> & {
   app: AppInstance;
   blossom?: BlossomContext;
+  uploadToken?: UploadTokenContext;
   id?: string;
 };

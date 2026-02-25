@@ -22,25 +22,34 @@ pnpm start
 
 ## Environment variables
 
-| Variable                 | Required | Default                            | Description                                                                                                               |
-| ------------------------ | -------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `DB_PATH`                | Yes      | —                                  | Directory for the SQLite database file                                                                                    |
-| `R2_BUCKET`              | Yes      | —                                  | R2 bucket name                                                                                                            |
-| `R2_ENDPOINT`            | Yes      | —                                  | R2 endpoint URL (e.g. `https://<account>.r2.cloudflarestorage.com`)                                                       |
-| `R2_ACCESS_KEY_ID`       | Yes      | —                                  | R2 access key ID                                                                                                          |
-| `R2_SECRET_ACCESS_KEY`   | Yes      | —                                  | R2 secret access key                                                                                                      |
-| `PORT`                   | No       | `5050`                             | HTTP server port                                                                                                          |
-| `AUTH_TOLERANCE_SECONDS` | No       | `0`                                | Clock skew tolerance for Blossom auth (seconds)                                                                           |
-| `BLOSSOM_PUBLIC_URL`     | No       | `https://blossom.smartflow.social` | Base URL returned in upload responses for blob URLs                                                                       |
-| `SFS_INTERNAL_URL`       | No\*     | —                                  | SmartFlow app base URL for subscription checks (e.g. `https://app.smartflow.social`). Must be reachable from this server. |
-| `SFS_INTERNAL_SECRET`    | No\*     | —                                  | Must match SmartFlow app env `BLOSSOM_INTERNAL_SECRET`. Sent as `x-internal-secret` header.                               |
-| `NODE_ENV`               | No       | `development`                      | Environment name                                                                                                          |
-| `NATIVE_BINDINGS_PATH`   | No       | —                                  | Path to directory containing `arm64/` or `x64/better_sqlite3.node` for better-sqlite3                                     |
+| Variable                        | Required | Default                                             | Description                                                                                                                    |
+| ------------------------------- | -------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `DB_PATH`                       | Yes      | —                                                   | Directory for the SQLite database file                                                                                         |
+| `R2_BUCKET`                     | Yes      | —                                                   | R2 bucket name                                                                                                                 |
+| `R2_ENDPOINT`                   | Yes      | —                                                   | R2 endpoint URL (e.g. `https://<account>.r2.cloudflarestorage.com`)                                                            |
+| `R2_ACCESS_KEY_ID`              | Yes      | —                                                   | R2 access key ID                                                                                                               |
+| `R2_SECRET_ACCESS_KEY`          | Yes      | —                                                   | R2 secret access key                                                                                                           |
+| `PORT`                          | No       | `5050`                                              | HTTP server port                                                                                                               |
+| `AUTH_TOLERANCE_SECONDS`        | No       | `0`                                                 | Clock skew tolerance for Blossom auth (seconds)                                                                                |
+| `BLOSSOM_PUBLIC_URL`            | No       | `https://blossom.smartflow.social`                  | Base URL returned in upload responses for blob URLs                                                                            |
+| `SFS_INTERNAL_URL`              | No\*     | —                                                   | SmartFlow app base URL for commit callbacks (e.g. `https://app.smartflow.social`). Must be reachable from this server.         |
+| `SFS_INTERNAL_SECRET`           | No\*     | —                                                   | Must match SmartFlow app env `BLOSSOM_INTERNAL_SECRET`. Used for internal commit auth header.                                  |
+| `SFS_UPLOAD_TOKEN_SECRET`       | No\*     | `SFS_INTERNAL_SECRET`                               | HMAC secret used to verify `X-SFS-Upload-Token` JWTs. Must match SmartFlow `BLOSSOM_UPLOAD_TOKEN_SECRET` (or fallback secret). |
+| `SFS_COMMIT_BATCH_URL`          | No       | `${SFS_INTERNAL_URL}/internal/blossom/commit-batch` | Internal SmartFlow commit endpoint.                                                                                            |
+| `SFS_COMMIT_BATCH_SIZE`         | No       | `20`                                                | Buffered commit flush threshold (items).                                                                                       |
+| `SFS_COMMIT_FLUSH_MS`           | No       | `2000`                                              | Buffered commit flush interval (milliseconds).                                                                                 |
+| `RATE_LIMIT_UPLOADS_BURST`      | No       | `20`                                                | Uploads token-bucket burst per pubkey.                                                                                         |
+| `RATE_LIMIT_UPLOADS_PER_MIN`    | No       | `10`                                                | Uploads token-bucket refill rate per minute per pubkey.                                                                        |
+| `RATE_LIMIT_BYTES_BURST`        | No       | `524288000`                                         | Bytes token-bucket burst per pubkey.                                                                                           |
+| `RATE_LIMIT_BYTES_PER_MIN`      | No       | `209715200`                                         | Bytes token-bucket refill rate per minute per pubkey.                                                                          |
+| `RATE_LIMIT_IP_UPLOADS_PER_MIN` | No       | `120`                                               | Cheap IP pre-limit per minute.                                                                                                 |
+| `NODE_ENV`                      | No       | `development`                                       | Environment name                                                                                                               |
+| `NATIVE_BINDINGS_PATH`          | No       | —                                                   | Path to directory containing `arm64/` or `x64/better_sqlite3.node` for better-sqlite3                                          |
 
-For upload gating (SFS Blossom), **both** `SFS_INTERNAL_URL` and `SFS_INTERNAL_SECRET` must be set.
-If either is missing, subscription checks are skipped and all uploads are rejected with 403. The
-server logs the reason (e.g. "Subscription check skipped: SFS_INTERNAL_URL or SFS_INTERNAL_SECRET
-not set", or "SFS returned active false", or fetch error).
+For Blossom v2 token + commit flow, configure **both** `SFS_INTERNAL_SECRET` and a shared token
+secret (`SFS_UPLOAD_TOKEN_SECRET` or fallback `SFS_INTERNAL_SECRET`) plus `SFS_INTERNAL_URL`. If
+commit endpoint configuration is missing/unreachable, uploads are accepted and queued for
+reconciliation retries.
 
 ## Operations
 
@@ -58,10 +67,13 @@ not set", or "SFS returned active false", or fetch error).
 
 ### Rate limiting
 
-Uploads are rate-limited in memory: **10 uploads per minute per pubkey**. The limit is per process;
-with multiple instances, each has its own counter. Expired windows are cleaned up periodically. For
-multi-instance–shared limits, you would need an external store (e.g. Redis) and is not implemented
-here.
+Uploads use in-memory token buckets:
+
+- Per-pubkey uploads/min (burst + refill)
+- Per-pubkey bytes/min (burst + refill)
+- Cheap IP uploads/min pre-check
+
+Limits are currently per-process; multi-instance shared limiting requires an external store.
 
 ### Reverse proxy
 
@@ -69,9 +81,10 @@ If you use Nginx or similar, increase the max body size (e.g. 250MB) so large up
 
 ## API
 
-- **PUT /upload** — Blossom auth required; `t` tag must be `upload`; subscription must be active;
-  body is the blob; `x` tag must be the SHA-256 hash of the body. Response includes `url`, `x`,
-  `size`, `m`.
+- **PUT /upload** — `X-SFS-Upload-Token` required; optional Blossom auth compatibility header. Token
+  is validated, upload is streamed + SHA-256 verified, object stored to R2, and commit is buffered
+  to SmartFlow `/internal/blossom/commit-batch`. Response includes `url`, `sha256`, `x`, `size`,
+  `type`, `m`.
 - **HEAD /:key** — Returns 200 with `Content-Type` and `Content-Length` if the blob exists, 404
   otherwise. No auth.
 - **DELETE /:key** — Blossom auth required; `t` tag must be `delete`; only the owning pubkey can

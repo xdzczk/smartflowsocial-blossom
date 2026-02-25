@@ -12,6 +12,21 @@ export interface BlobRow {
   created: number;
 }
 
+export interface UncommittedRow {
+  id: number;
+  jti: string;
+  batchId: string;
+  pubkey: string;
+  sha256: string;
+  size: number;
+  type: string;
+  url: string;
+  attempts: number;
+  nextRetryAt: number;
+  created: number;
+  updated: number;
+}
+
 export interface DatabaseOptions {
   dbPath: string;
   nativeBindingsPath?: string;
@@ -40,6 +55,28 @@ class Database {
         created INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_blobs_pubkey ON blobs(pubkey);
+      CREATE TABLE IF NOT EXISTS used_jti (
+        jti TEXT PRIMARY KEY,
+        pubkey TEXT NOT NULL,
+        expires INTEGER NOT NULL,
+        created INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_used_jti_expires ON used_jti(expires);
+      CREATE TABLE IF NOT EXISTS uncommitted_uploads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jti TEXT NOT NULL UNIQUE,
+        batch_id TEXT NOT NULL,
+        pubkey TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        url TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_retry_at INTEGER NOT NULL,
+        created INTEGER NOT NULL,
+        updated INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_uncommitted_retry ON uncommitted_uploads(next_retry_at);
     `);
   }
 
@@ -92,6 +129,88 @@ class Database {
 
   close(): void {
     this.db.close();
+  }
+
+  markJtiUsed(params: {
+    jti: string;
+    pubkey: string;
+    expires: number;
+  }): boolean {
+    const created = Math.floor(Date.now() / 1000);
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO used_jti (jti, pubkey, expires, created) VALUES (?, ?, ?, ?)`
+      )
+      .run(params.jti, params.pubkey, params.expires, created);
+    return result.changes > 0;
+  }
+
+  cleanupExpiredJti(now = Math.floor(Date.now() / 1000)): number {
+    const result = this.db
+      .prepare(`DELETE FROM used_jti WHERE expires <= ?`)
+      .run(now);
+    return result.changes;
+  }
+
+  enqueueUncommitted(params: {
+    jti: string;
+    batchId: string;
+    pubkey: string;
+    sha256: string;
+    size: number;
+    type: string;
+    url: string;
+  }): void {
+    const now = Math.floor(Date.now() / 1000);
+    this.db
+      .prepare(
+        `INSERT INTO uncommitted_uploads
+          (jti, batch_id, pubkey, sha256, size, type, url, attempts, next_retry_at, created, updated)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+          ON CONFLICT(jti) DO NOTHING`
+      )
+      .run(
+        params.jti,
+        params.batchId,
+        params.pubkey,
+        params.sha256,
+        params.size,
+        params.type,
+        params.url,
+        now,
+        now,
+        now
+      );
+  }
+
+  listRetryableUncommitted(
+    now = Math.floor(Date.now() / 1000),
+    limit = 100
+  ): UncommittedRow[] {
+    return this.db
+      .prepare(
+        `SELECT id, jti, batch_id as batchId, pubkey, sha256, size, type, url, attempts, next_retry_at as nextRetryAt, created, updated
+         FROM uncommitted_uploads
+         WHERE next_retry_at <= ?
+         ORDER BY id ASC
+         LIMIT ?`
+      )
+      .all(now, limit) as UncommittedRow[];
+  }
+
+  markUncommittedSuccess(id: number): void {
+    this.db.prepare(`DELETE FROM uncommitted_uploads WHERE id = ?`).run(id);
+  }
+
+  markUncommittedFailure(id: number, nextRetryAt: number): void {
+    const now = Math.floor(Date.now() / 1000);
+    this.db
+      .prepare(
+        `UPDATE uncommitted_uploads
+         SET attempts = attempts + 1, next_retry_at = ?, updated = ?
+         WHERE id = ?`
+      )
+      .run(nextRetryAt, now, id);
   }
 }
 

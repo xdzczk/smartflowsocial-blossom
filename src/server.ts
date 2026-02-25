@@ -15,6 +15,10 @@ import { createHealthRouter } from "./routes/health.js";
 import internalDeleteRoute from "./routes/internal-delete.js";
 import uploadRoute from "./routes/upload.js";
 import authMiddleware from "./services/auth.js";
+import {
+  flushCommitBuffer,
+  startCommitReconciliation,
+} from "./services/commit.js";
 import Database from "./services/db.js";
 import type { AppInstance, AppRequest } from "./types.js";
 
@@ -39,7 +43,15 @@ function errorHandler(
   const appReq = req as unknown as AppRequest;
   const requestId = appReq.id ?? "unknown";
   if (err instanceof ApiError) {
-    res.status(err.code).json({ message: err.message });
+    const body: Record<string, unknown> = {
+      error: err.error,
+      message: err.message,
+    };
+    if (typeof err.retryAfter === "number") {
+      body["retry_after"] = err.retryAfter;
+      res.setHeader("Retry-After", String(err.retryAfter));
+    }
+    res.status(err.code).json(body);
     return;
   }
   log.error("Unhandled error", {
@@ -75,50 +87,6 @@ function asyncHandler(
 
 const TEMP_DIR = "/tmp/sfs-blossom";
 
-/** In-memory rate limit: max 10 uploads per minute per pubkey. Per-process only; not shared across instances. */
-const RATE_LIMIT_UPLOADS_PER_MIN = 10;
-const RATE_LIMIT_CLEANUP_MS = 90 * 1000;
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-function cleanupRateLimitMap(): void {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitMap.entries()) {
-    if (now >= entry.resetAt) {
-      rateLimitMap.delete(key);
-    }
-  }
-}
-
-function rateLimitUpload(
-  _req: express.Request,
-  res: express.Response,
-  next: express.NextFunction
-): void {
-  const req = _req as unknown as AppRequest;
-  const pubkey = req.blossom?.auth?.pubkey;
-  if (!pubkey) {
-    next();
-    return;
-  }
-  const now = Date.now();
-  const windowMs = 60 * 1000;
-  let entry = rateLimitMap.get(pubkey);
-  if (!entry) {
-    entry = { count: 0, resetAt: now + windowMs };
-    rateLimitMap.set(pubkey, entry);
-  }
-  if (now >= entry.resetAt) {
-    entry.count = 0;
-    entry.resetAt = now + windowMs;
-  }
-  entry.count++;
-  if (entry.count > RATE_LIMIT_UPLOADS_PER_MIN) {
-    res.status(429).json({ message: "Too many uploads; try again later" });
-    return;
-  }
-  next();
-}
-
 export async function start(): Promise<void> {
   dotenv.config();
   const config = loadConfig();
@@ -142,18 +110,9 @@ export async function start(): Promise<void> {
 
   app.use(createHealthRouter(app));
 
-  const rateLimitCleanupInterval = setInterval(
-    cleanupRateLimitMap,
-    RATE_LIMIT_CLEANUP_MS
-  );
-  rateLimitCleanupInterval.unref();
+  const commitReconcileInterval = startCommitReconciliation(app);
 
-  app.put(
-    "/upload",
-    authMiddleware as unknown as express.RequestHandler,
-    rateLimitUpload,
-    asyncHandler(uploadRoute)
-  );
+  app.put("/upload", asyncHandler(uploadRoute));
   app.head(
     "/:key",
     asyncHandler(
@@ -176,14 +135,15 @@ export async function start(): Promise<void> {
 
   app.use(errorHandler);
 
-  const host = process.env.HOST?.trim() || "0.0.0.0";
+  const host = process.env["HOST"]?.trim() ?? "0.0.0.0";
   const server = app.listen(config.port, host, () => {
     log.info("Listening", { host, port: config.port });
   });
 
   function shutdown(signal: string): void {
     log.info("Shutting down", { signal });
-    clearInterval(rateLimitCleanupInterval);
+    clearInterval(commitReconcileInterval);
+    void flushCommitBuffer(app);
     server.close(() => {
       app.db.close();
       log.info("Server closed");

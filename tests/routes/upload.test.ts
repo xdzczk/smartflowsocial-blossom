@@ -3,11 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import uploadRoute from "../../src/routes/upload.js";
 import type { AppRequest } from "../../src/types.js";
 
-const verifySubscriptionMock = vi.fn();
-vi.mock("../../src/services/subscription.js", () => ({
-  verifySubscription: (pubkey: string) => verifySubscriptionMock(pubkey),
-}));
-
 function mockRes() {
   const res = {
     statusCode: 0,
@@ -55,65 +50,30 @@ function createReq(
 
 describe("PUT /upload", () => {
   beforeEach(() => {
-    verifySubscriptionMock.mockReset();
     vi.unstubAllEnvs();
+    process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
   });
 
-  it("throws 401 when verb is not upload", async () => {
-    const req = createReq({
-      blossom: { verb: "delete", auth: { pubkey: "p", tags: [["x", "h"]] } },
-    });
-    const res = mockRes();
-    await expect(uploadRoute(req, res as never)).rejects.toMatchObject({
-      message: "Expected t tag value 'upload'",
-      code: 401,
-    });
-    expect(verifySubscriptionMock).not.toHaveBeenCalled();
-  });
-
-  it("throws 403 when subscription is inactive", async () => {
-    verifySubscriptionMock.mockResolvedValue(false);
+  it("throws 401 when upload token header is missing", async () => {
     const req = createReq();
     const res = mockRes();
     await expect(uploadRoute(req, res as never)).rejects.toMatchObject({
-      message: "Subscription required",
-      code: 403,
+      code: 401,
+      error: "invalid_token",
     });
-    expect(verifySubscriptionMock).toHaveBeenCalledWith("pk");
   });
 
-  it("throws 401 when x tag is missing", async () => {
-    verifySubscriptionMock.mockResolvedValue(true);
+  it("throws 401 when upload token is malformed", async () => {
     const req = createReq({
-      blossom: {
-        verb: "upload",
-        auth: { pubkey: "p", tags: [["name", "x.jpg"]] },
-      },
-    });
-    const res = mockRes();
-    const err = await uploadRoute(req, res as never).catch((e: unknown) => e);
-    expect(err).toMatchObject({ code: 401 });
-    expect((err as { message: string }).message).toContain("x tag");
-  });
-
-  it("throws 401 when x tag is duplicated", async () => {
-    verifySubscriptionMock.mockResolvedValue(true);
-    const req = createReq({
-      blossom: {
-        verb: "upload",
-        auth: {
-          pubkey: "p",
-          tags: [
-            ["x", "h1"],
-            ["x", "h2"],
-          ],
-        },
+      headers: {
+        "content-type": "image/jpeg",
+        "x-sfs-upload-token": "not.a.valid.jwt",
       },
     });
     const res = mockRes();
     await expect(uploadRoute(req, res as never)).rejects.toMatchObject({
-      message: "Duplicate x tag",
       code: 401,
+      error: "invalid_token",
     });
   });
 });

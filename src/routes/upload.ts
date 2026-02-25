@@ -10,10 +10,16 @@ import { fileTypeFromStream } from "file-type";
 import { loadConfig } from "../config.js";
 import { ApiError } from "../errors.js";
 import { log } from "../logger.js";
+import { parseBlossomAuthorizationHeader } from "../services/auth.js";
+import { enqueueCommitItem } from "../services/commit.js";
+import {
+  enforceIpRateLimit,
+  enforcePubkeyRateLimits,
+} from "../services/rate-limit.js";
 import * as storage from "../services/storage.js";
-import { verifySubscription } from "../services/subscription.js";
+import { verifyUploadToken } from "../services/upload-token.js";
 import type { AppRequest } from "../types.js";
-import { isAllowedMime, getExtension, getType } from "../utils/mime.js";
+import { isAllowedMime, getExtension } from "../utils/mime.js";
 
 const TEMP_DIR = "/tmp/sfs-blossom";
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
@@ -30,38 +36,79 @@ export default async function upload(
   const bucket = config.r2.bucket;
 
   try {
-    if (req.blossom?.verb !== "upload") {
-      throw new ApiError("Expected t tag value 'upload'", 401);
+    const ip =
+      (typeof req.headers["x-forwarded-for"] === "string"
+        ? req.headers["x-forwarded-for"].split(",")[0]?.trim()
+        : undefined) ??
+      req.ip ??
+      "unknown";
+    const ipRate = enforceIpRateLimit(ip);
+    if (!ipRate.allowed) {
+      throw new ApiError("Too many requests", 429, {
+        error: "rate_limited",
+        retryAfter: ipRate.retryAfterSec,
+      });
+    }
+
+    const rawToken = req.headers["x-sfs-upload-token"];
+    const tokenHeader = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+    if (!tokenHeader) {
+      throw new ApiError("Missing upload token", 401, {
+        error: "invalid_token",
+      });
+    }
+    const token = verifyUploadToken(tokenHeader);
+    req.uploadToken = token;
+
+    if (req.headers.authorization) {
+      const parsed = parseBlossomAuthorizationHeader(req.headers.authorization);
+      if (parsed.verb !== "upload") {
+        throw new ApiError("Expected t tag value 'upload'", 401, {
+          error: "invalid_token",
+        });
+      }
+      if (parsed.auth.pubkey !== token.sub) {
+        throw new ApiError("Auth pubkey does not match upload token", 401, {
+          error: "invalid_token",
+        });
+      }
+      req.blossom = { auth: parsed.auth, verb: parsed.verb };
+    }
+
+    const rate = enforcePubkeyRateLimits(token.sub, token.size);
+    if (!rate.allowed) {
+      throw new ApiError("Rate limited", 429, {
+        error: "rate_limited",
+        retryAfter: rate.retryAfterSec,
+      });
+    }
+
+    const jtiAccepted = req.app.db.markJtiUsed({
+      jti: token.jti,
+      pubkey: token.sub,
+      expires: token.exp,
+    });
+    if (!jtiAccepted) {
+      throw new ApiError("Upload token already used", 401, {
+        error: "invalid_token",
+      });
     }
 
     const contentLength = req.headers["content-length"];
     if (contentLength) {
       const len = parseInt(contentLength, 10);
       if (!isNaN(len) && len > MAX_UPLOAD_BYTES) {
-        throw new ApiError("Payload too large (max 250MB)", 413);
+        throw new ApiError("Payload too large", 413, {
+          error: "payload_too_large",
+        });
+      }
+      if (!isNaN(len) && len > token.size) {
+        throw new ApiError("Payload larger than reserved token size", 413, {
+          error: "payload_too_large",
+        });
       }
     }
-
-    const active = await verifySubscription(req.blossom.auth.pubkey);
-    if (!active) {
-      throw new ApiError("Subscription required", 403);
-    }
-
-    let expectedHash: string | undefined;
-    for (const tag of req.blossom.auth.tags) {
-      if (tag[0] === "x") {
-        if (expectedHash) {
-          throw new ApiError("Duplicate x tag", 401);
-        }
-        expectedHash = tag[1];
-      }
-    }
-    if (!expectedHash) {
-      throw new ApiError(
-        "A x tag with a content hash is required in the auth header",
-        401
-      );
-    }
+    const expectedHash = token.sha256;
 
     tempKey = `${crypto.randomBytes(20).toString("hex")}.temp`;
     tempPath = path.join(TEMP_DIR, tempKey);
@@ -84,7 +131,7 @@ export default async function upload(
 
     passThrough.on("data", (chunk: Buffer) => {
       bytesRead += chunk.length;
-      if (bytesRead > MAX_UPLOAD_BYTES) {
+      if (bytesRead > MAX_UPLOAD_BYTES || bytesRead > token.size) {
         passThrough.destroy(new Error("MAX_SIZE"));
       }
     });
@@ -105,8 +152,15 @@ export default async function upload(
 
     await uploading.done();
 
-    if (bytesRead > MAX_UPLOAD_BYTES) {
-      throw new ApiError("Payload too large (max 250MB)", 413);
+    if (bytesRead > MAX_UPLOAD_BYTES || bytesRead > token.size) {
+      throw new ApiError("Payload too large", 413, {
+        error: "payload_too_large",
+      });
+    }
+    if (bytesRead !== token.size) {
+      throw new ApiError("Payload size does not match upload token", 400, {
+        error: "invalid_request",
+      });
     }
 
     if (!sha256 && savedLocal) {
@@ -114,21 +168,13 @@ export default async function upload(
     }
 
     if (expectedHash !== sha256) {
-      throw new ApiError(
-        "Hash given in x tag does not match detected content hash",
-        401
-      );
+      throw new ApiError("SHA-256 mismatch", 400, { error: "sha256_mismatch" });
     }
 
     let ext: string | null = null;
     let mimeType: string | undefined;
-    const nameTag = req.blossom.auth.tags.find((t) => t[0] === "name");
-
-    if (nameTag) {
-      const filename = nameTag[1];
-      ext = filename !== undefined ? (filename.split(".").pop() ?? null) : null;
-      mimeType = ext ? (getType(ext) ?? undefined) : undefined;
-    }
+    mimeType = token.type;
+    ext = token.type ? (getExtension(token.type) ?? null) : null;
 
     const headerMime = req.headers["content-type"];
     const headerMimeStr =
@@ -156,7 +202,9 @@ export default async function upload(
     }
 
     if (!isAllowedMime(mimeType)) {
-      throw new ApiError("Only image and video types are allowed", 400);
+      throw new ApiError("Only image and video types are allowed", 400, {
+        error: "invalid_request",
+      });
     }
 
     if (sha256 === undefined) {
@@ -170,7 +218,7 @@ export default async function upload(
 
     req.app.db.createBlob({
       key: finalKey,
-      pubkey: req.blossom.auth.pubkey,
+      pubkey: token.sub,
       type: mimeType,
       size,
     });
@@ -178,6 +226,23 @@ export default async function upload(
     await storage.deleteObject(tempKey);
 
     const url = `${config.blossomPublicUrl.replace(/\/$/, "")}/${finalKey}`;
+    enqueueCommitItem(req.app, token.batchId, {
+      jti: token.jti,
+      pubkey: token.sub,
+      sha256,
+      size,
+      type: mimeType,
+      url,
+    });
+    log.info("upload_completed", {
+      requestId: req.id,
+      pubkey: token.sub,
+      sha256,
+      size,
+      jti: token.jti,
+      batchId: token.batchId,
+      result: "ok",
+    });
 
     // Nostrify BlossomUploader expects { url, sha256, size, type }; include x/m for NIP-94 compatibility
     res.json({
@@ -189,8 +254,21 @@ export default async function upload(
       m: mimeType,
     });
   } catch (err) {
-    if (bytesRead > MAX_UPLOAD_BYTES) {
-      throw new ApiError("Payload too large (max 250MB)", 413);
+    log.warn("upload_failed", {
+      requestId: req.id,
+      reason: err instanceof Error ? err.message : String(err),
+      bytesRead,
+      pubkey: req.uploadToken?.sub,
+      jti: req.uploadToken?.jti,
+      batchId: req.uploadToken?.batchId,
+    });
+    if (
+      bytesRead > MAX_UPLOAD_BYTES ||
+      (req.uploadToken && bytesRead > req.uploadToken.size)
+    ) {
+      throw new ApiError("Payload too large", 413, {
+        error: "payload_too_large",
+      });
     }
     throw err;
   } finally {
