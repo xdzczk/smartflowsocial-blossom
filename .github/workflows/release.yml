@@ -60,7 +60,7 @@ jobs:
           path: sbom.spdx.json
 
       - name: Generate build provenance attestation
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: sha256:${{ hashFiles('Dockerfile', 'package.json', 'pnpm-lock.yaml') }}
