@@ -71,6 +71,12 @@ export default async function upload(
       lane,
       config.sfs.compatibilityMode.maxUploadBytes
     );
+    const contentLength = req.headers["content-length"];
+    const parsedContentLength = contentLength
+      ? parseInt(contentLength, 10)
+      : NaN;
+    const hasValidContentLength =
+      Number.isFinite(parsedContentLength) && parsedContentLength > 0;
 
     if (lane === "compat") {
       const compatPolicy = await getCompatPolicyForPubkey(context.pubkey, {
@@ -86,13 +92,19 @@ export default async function upload(
           error: "subscription_required",
         });
       }
+      // Compat uploads are harder to pre-authorize, so require a bounded size
+      // before streaming if auth did not include an explicit expected size.
+      if (context.expectedSize === undefined && !hasValidContentLength) {
+        throw new ApiError(
+          "Content-Length required for compatibility uploads",
+          411,
+          { error: "invalid_request" }
+        );
+      }
     }
 
-    const headerLenRaw = req.headers["content-length"];
-    const headerLen = headerLenRaw ? parseInt(headerLenRaw, 10) : NaN;
     const rateBytes =
-      context.expectedSize ??
-      (Number.isFinite(headerLen) && headerLen > 0 ? headerLen : 1);
+      context.expectedSize ?? (hasValidContentLength ? parsedContentLength : 1);
     const rate =
       lane === "authoritative"
         ? enforcePubkeyRateLimits(context.pubkey, rateBytes)
@@ -117,9 +129,8 @@ export default async function upload(
       }
     }
 
-    const contentLength = req.headers["content-length"];
     if (contentLength) {
-      const len = parseInt(contentLength, 10);
+      const len = parsedContentLength;
       if (!isNaN(len) && len > laneMaxBytes) {
         throw new ApiError("Payload too large", 413, {
           error: "payload_too_large",

@@ -28,6 +28,15 @@ function optionalBool(name: string, defaultValue: boolean): boolean {
   return defaultValue;
 }
 
+function optionalRateLimitMode(
+  name: string,
+  defaultValue: "local" | "redis"
+): "local" | "redis" {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (raw === "local" || raw === "redis") return raw;
+  return defaultValue;
+}
+
 export interface Config {
   dbPath: string;
   r2: {
@@ -55,6 +64,7 @@ export interface Config {
     readinessMaxPendingCommits: number;
   };
   rateLimit: {
+    mode: "local" | "redis";
     uploadsBurst: number;
     uploadsPerMin: number;
     bytesBurst: number;
@@ -134,6 +144,7 @@ export function loadConfig(): Config {
       ),
     },
     rateLimit: {
+      mode: optionalRateLimitMode("RATE_LIMIT_MODE", "local"),
       uploadsBurst: optionalInt("RATE_LIMIT_UPLOADS_BURST", 20),
       uploadsPerMin: optionalInt("RATE_LIMIT_UPLOADS_PER_MIN", 10),
       bytesBurst: optionalInt("RATE_LIMIT_BYTES_BURST", 500 * 1024 * 1024),

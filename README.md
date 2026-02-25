@@ -102,6 +102,7 @@ pnpm test:performance
 | `SFS_COMPAT_MODE_ENABLED`           | `true`                             | Enable compatibility upload lane.                 |
 | `SFS_COMPAT_MAX_UPLOAD_BYTES`       | `52428800`                         | Max bytes for compat lane (50MB default).         |
 | `SFS_READINESS_MAX_PENDING_COMMITS` | `1000`                             | Readiness threshold for retryable commit backlog. |
+| `RATE_LIMIT_MODE`                   | `local`                            | `local` (in-process) or `redis` (future backend). |
 | `RATE_LIMIT_*`                      | varies                             | Upload/IP/byte token-bucket limits.               |
 | `METRICS_TOKEN`                     | empty                              | Token gate for `/metrics` access.                 |
 | `METRICS_ALLOWLIST`                 | empty                              | Comma-separated IP allowlist for `/metrics`.      |
@@ -180,6 +181,22 @@ More:
 - Commit callbacks are retried via durable reconciliation queue.
 - Graceful shutdown flushes commit state before exit (with timeout guard).
 - Readiness reflects operational dependency health, not process liveness only.
+- Reconciliation commit payloads are chunked by `SFS_COMMIT_BATCH_SIZE` per `batchId`.
+
+## Deployment Notes
+
+- `RATE_LIMIT_MODE=local` uses in-memory token buckets and is per-instance.
+- If running multiple gateway instances, use upstream global throttling (WAF/LB/API gateway) for
+  hard limits.
+- `RATE_LIMIT_MODE=redis` is a forward-compatible config mode and currently falls back to local
+  enforcement.
+
+## Active Runtime Surface
+
+- Production build/serve path is `src/index.ts` -> `src/server.ts` -> `build/index.js`.
+- Root-level legacy files (for example `index.ts`, `routes/*`, `listener/*`, `exchange/*`) are not
+  part of the current production entrypoint.
+- Prefer making gateway changes under `src/` and `tests/`.
 
 Runbooks and SLOs:
 

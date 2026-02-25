@@ -1,9 +1,22 @@
 import { loadConfig } from "../config.js";
+import { log } from "../logger.js";
 
 interface TokenBucketState {
   tokens: number;
   lastRefillMs: number;
   lastSeenMs: number;
+}
+
+interface RateLimitProvider {
+  enforceIpRateLimit(ip: string): { allowed: boolean; retryAfterSec: number };
+  enforcePubkeyRateLimits(
+    pubkey: string,
+    bytes: number
+  ): { allowed: boolean; retryAfterSec: number };
+  enforceCompatPubkeyRateLimits(
+    pubkey: string,
+    bytes: number
+  ): { allowed: boolean; retryAfterSec: number };
 }
 
 const pubkeyUploadBuckets = new Map<string, TokenBucketState>();
@@ -13,6 +26,7 @@ const compatPubkeyBytesBuckets = new Map<string, TokenBucketState>();
 const ipBuckets = new Map<string, TokenBucketState>();
 const BUCKET_IDLE_TTL_MS = 15 * 60 * 1000;
 let lastSweepMs = 0;
+let didWarnRedisFallback = false;
 
 function sweepExpiredBuckets(
   map: Map<string, TokenBucketState>,
@@ -74,59 +88,85 @@ function consumeTokens(
   return { allowed: false, retryAfterSec: Math.max(1, retryAfterSec) };
 }
 
+const localRateLimitProvider: RateLimitProvider = {
+  enforceIpRateLimit(ip: string): { allowed: boolean; retryAfterSec: number } {
+    const cfg = loadConfig().rateLimit;
+    const capacity = Math.max(1, cfg.ipUploadsPerMin);
+    const refillPerSecond = capacity / 60;
+    return consumeTokens(ipBuckets, ip, 1, capacity, refillPerSecond);
+  },
+  enforcePubkeyRateLimits(
+    pubkey: string,
+    bytes: number
+  ): { allowed: boolean; retryAfterSec: number } {
+    const cfg = loadConfig().rateLimit;
+    const uploads = consumeTokens(
+      pubkeyUploadBuckets,
+      pubkey,
+      1,
+      Math.max(1, cfg.uploadsBurst),
+      Math.max(1, cfg.uploadsPerMin) / 60
+    );
+    if (!uploads.allowed) return uploads;
+
+    return consumeTokens(
+      pubkeyBytesBuckets,
+      pubkey,
+      Math.max(1, bytes),
+      Math.max(1, cfg.bytesBurst),
+      Math.max(1, cfg.bytesPerMin) / 60
+    );
+  },
+  enforceCompatPubkeyRateLimits(
+    pubkey: string,
+    bytes: number
+  ): { allowed: boolean; retryAfterSec: number } {
+    const cfg = loadConfig().rateLimit;
+    const uploads = consumeTokens(
+      compatPubkeyUploadBuckets,
+      pubkey,
+      1,
+      Math.max(1, cfg.compatUploadsBurst),
+      Math.max(1, cfg.compatUploadsPerMin) / 60
+    );
+    if (!uploads.allowed) return uploads;
+
+    return consumeTokens(
+      compatPubkeyBytesBuckets,
+      pubkey,
+      Math.max(1, bytes),
+      Math.max(1, cfg.compatBytesBurst),
+      Math.max(1, cfg.compatBytesPerMin) / 60
+    );
+  },
+};
+
+function getRateLimitProvider(): RateLimitProvider {
+  const mode = loadConfig().rateLimit.mode;
+  if (mode === "redis" && !didWarnRedisFallback) {
+    didWarnRedisFallback = true;
+    log.warn("RATE_LIMIT_MODE=redis requested, falling back to local provider");
+  }
+  return localRateLimitProvider;
+}
+
 export function enforceIpRateLimit(ip: string): {
   allowed: boolean;
   retryAfterSec: number;
 } {
-  const cfg = loadConfig().rateLimit;
-  const capacity = Math.max(1, cfg.ipUploadsPerMin);
-  const refillPerSecond = capacity / 60;
-  return consumeTokens(ipBuckets, ip, 1, capacity, refillPerSecond);
+  return getRateLimitProvider().enforceIpRateLimit(ip);
 }
 
 export function enforcePubkeyRateLimits(
   pubkey: string,
   bytes: number
 ): { allowed: boolean; retryAfterSec: number } {
-  const cfg = loadConfig().rateLimit;
-  const uploads = consumeTokens(
-    pubkeyUploadBuckets,
-    pubkey,
-    1,
-    Math.max(1, cfg.uploadsBurst),
-    Math.max(1, cfg.uploadsPerMin) / 60
-  );
-  if (!uploads.allowed) return uploads;
-
-  const byBytes = consumeTokens(
-    pubkeyBytesBuckets,
-    pubkey,
-    Math.max(1, bytes),
-    Math.max(1, cfg.bytesBurst),
-    Math.max(1, cfg.bytesPerMin) / 60
-  );
-  return byBytes;
+  return getRateLimitProvider().enforcePubkeyRateLimits(pubkey, bytes);
 }
 
 export function enforceCompatPubkeyRateLimits(
   pubkey: string,
   bytes: number
 ): { allowed: boolean; retryAfterSec: number } {
-  const cfg = loadConfig().rateLimit;
-  const uploads = consumeTokens(
-    compatPubkeyUploadBuckets,
-    pubkey,
-    1,
-    Math.max(1, cfg.compatUploadsBurst),
-    Math.max(1, cfg.compatUploadsPerMin) / 60
-  );
-  if (!uploads.allowed) return uploads;
-
-  return consumeTokens(
-    compatPubkeyBytesBuckets,
-    pubkey,
-    Math.max(1, bytes),
-    Math.max(1, cfg.compatBytesBurst),
-    Math.max(1, cfg.compatBytesPerMin) / 60
-  );
+  return getRateLimitProvider().enforceCompatPubkeyRateLimits(pubkey, bytes);
 }

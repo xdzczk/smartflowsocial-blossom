@@ -60,9 +60,10 @@ async function flushPendingUncommitted(
   app: AppInstance,
   batchSize: number
 ): Promise<number> {
+  const safeBatchSize = Math.max(1, batchSize);
   const pending = app.db.listRetryableUncommitted(
     Math.floor(Date.now() / 1000),
-    Math.max(batchSize * 10, 100)
+    Math.max(safeBatchSize * 10, 100)
   );
   if (pending.length === 0) return 0;
 
@@ -75,27 +76,30 @@ async function flushPendingUncommitted(
 
   let processed = 0;
   for (const [batchId, rows] of grouped.entries()) {
-    const items: CommitItem[] = rows.map((row) => ({
-      jti: row.jti,
-      pubkey: row.pubkey,
-      sha256: row.sha256,
-      size: row.size,
-      type: row.type,
-      url: row.url,
-    }));
-    const result = await sendCommitBatch(batchId, items);
-    const failedSet = new Set(result.failedJtis);
-    for (const row of rows) {
-      processed += 1;
-      if (result.ok && !failedSet.has(row.jti)) {
-        app.db.markUncommittedSuccess(row.id);
-        continue;
+    for (let idx = 0; idx < rows.length; idx += safeBatchSize) {
+      const chunk = rows.slice(idx, idx + safeBatchSize);
+      const items: CommitItem[] = chunk.map((row) => ({
+        jti: row.jti,
+        pubkey: row.pubkey,
+        sha256: row.sha256,
+        size: row.size,
+        type: row.type,
+        url: row.url,
+      }));
+      const result = await sendCommitBatch(batchId, items);
+      const failedSet = new Set(result.failedJtis);
+      for (const row of chunk) {
+        processed += 1;
+        if (result.ok && !failedSet.has(row.jti)) {
+          app.db.markUncommittedSuccess(row.id);
+          continue;
+        }
+        const backoffSec = Math.min(900, Math.max(30, 2 ** (row.attempts + 1)));
+        app.db.markUncommittedFailure(
+          row.id,
+          Math.floor(Date.now() / 1000) + backoffSec
+        );
       }
-      const backoffSec = Math.min(900, Math.max(30, 2 ** (row.attempts + 1)));
-      app.db.markUncommittedFailure(
-        row.id,
-        Math.floor(Date.now() / 1000) + backoffSec
-      );
     }
   }
 
