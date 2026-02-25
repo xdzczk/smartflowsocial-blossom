@@ -7,6 +7,8 @@ interface TokenBucketState {
 
 const pubkeyUploadBuckets = new Map<string, TokenBucketState>();
 const pubkeyBytesBuckets = new Map<string, TokenBucketState>();
+const compatPubkeyUploadBuckets = new Map<string, TokenBucketState>();
+const compatPubkeyBytesBuckets = new Map<string, TokenBucketState>();
 const ipBuckets = new Map<string, TokenBucketState>();
 
 function refillBucket(
@@ -78,4 +80,27 @@ export function enforcePubkeyRateLimits(
     Math.max(1, cfg.bytesPerMin) / 60
   );
   return byBytes;
+}
+
+export function enforceCompatPubkeyRateLimits(
+  pubkey: string,
+  bytes: number
+): { allowed: boolean; retryAfterSec: number } {
+  const cfg = loadConfig().rateLimit;
+  const uploads = consumeTokens(
+    compatPubkeyUploadBuckets,
+    pubkey,
+    1,
+    Math.max(1, cfg.compatUploadsBurst),
+    Math.max(1, cfg.compatUploadsPerMin) / 60
+  );
+  if (!uploads.allowed) return uploads;
+
+  return consumeTokens(
+    compatPubkeyBytesBuckets,
+    pubkey,
+    Math.max(1, bytes),
+    Math.max(1, cfg.compatBytesBurst),
+    Math.max(1, cfg.compatBytesPerMin) / 60
+  );
 }

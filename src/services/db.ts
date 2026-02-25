@@ -27,6 +27,16 @@ export interface UncommittedRow {
   updated: number;
 }
 
+export interface CompatUploadRow {
+  id: number;
+  pubkey: string;
+  sha256: string;
+  size: number;
+  type: string;
+  url: string;
+  created: number;
+}
+
 export interface DatabaseOptions {
   dbPath: string;
   nativeBindingsPath?: string;
@@ -77,6 +87,17 @@ class Database {
         updated INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_uncommitted_retry ON uncommitted_uploads(next_retry_at);
+      CREATE TABLE IF NOT EXISTS compat_uploads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pubkey TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        url TEXT NOT NULL,
+        created INTEGER NOT NULL,
+        UNIQUE(pubkey, sha256, url)
+      );
+      CREATE INDEX IF NOT EXISTS idx_compat_uploads_pubkey_created ON compat_uploads(pubkey, created);
     `);
   }
 
@@ -211,6 +232,41 @@ class Database {
          WHERE id = ?`
       )
       .run(nextRetryAt, now, id);
+  }
+
+  createCompatUpload(params: {
+    pubkey: string;
+    sha256: string;
+    size: number;
+    type: string;
+    url: string;
+  }): void {
+    const created = Math.floor(Date.now() / 1000);
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO compat_uploads (pubkey, sha256, size, type, url, created)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        params.pubkey,
+        params.sha256,
+        params.size,
+        params.type,
+        params.url,
+        created
+      );
+  }
+
+  listCompatUploads(pubkey: string, limit = 100): CompatUploadRow[] {
+    return this.db
+      .prepare(
+        `SELECT id, pubkey, sha256, size, type, url, created
+         FROM compat_uploads
+         WHERE pubkey = ?
+         ORDER BY id DESC
+         LIMIT ?`
+      )
+      .all(pubkey, limit) as CompatUploadRow[];
   }
 }
 

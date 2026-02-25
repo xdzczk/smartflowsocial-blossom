@@ -52,14 +52,15 @@ describe("PUT /upload", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
+    process.env["SFS_COMPAT_MODE_ENABLED"] = "true";
   });
 
-  it("throws 401 when upload token header is missing", async () => {
+  it("throws 401 when token and Blossom auth are both missing", async () => {
     const req = createReq();
     const res = mockRes();
     await expect(uploadRoute(req, res as never)).rejects.toMatchObject({
       code: 401,
-      error: "invalid_token",
+      error: "invalid_auth",
     });
   });
 
@@ -74,6 +75,20 @@ describe("PUT /upload", () => {
     await expect(uploadRoute(req, res as never)).rejects.toMatchObject({
       code: 401,
       error: "invalid_token",
+    });
+  });
+
+  it("throws 401 when compat auth header is invalid", async () => {
+    const req = createReq({
+      headers: {
+        "content-type": "image/jpeg",
+        authorization: "Nostr bad-base64",
+      },
+    });
+    const res = mockRes();
+    await expect(uploadRoute(req, res as never)).rejects.toMatchObject({
+      code: 401,
+      error: "invalid_auth",
     });
   });
 });

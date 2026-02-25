@@ -18,6 +18,16 @@ function optionalInt(name: string, defaultValue: number): number {
   return Number.isNaN(n) ? defaultValue : n;
 }
 
+function optionalBool(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return defaultValue;
+  if (raw === "1" || raw === "true" || raw === "yes" || raw === "on")
+    return true;
+  if (raw === "0" || raw === "false" || raw === "no" || raw === "off")
+    return false;
+  return defaultValue;
+}
+
 export interface Config {
   dbPath: string;
   r2: {
@@ -36,6 +46,10 @@ export interface Config {
     commitBatchUrl: string;
     commitBatchSize: number;
     commitFlushMs: number;
+    compatibilityMode: {
+      enabled: boolean;
+      maxUploadBytes: number;
+    };
   };
   rateLimit: {
     uploadsBurst: number;
@@ -43,6 +57,10 @@ export interface Config {
     bytesBurst: number;
     bytesPerMin: number;
     ipUploadsPerMin: number;
+    compatUploadsBurst: number;
+    compatUploadsPerMin: number;
+    compatBytesBurst: number;
+    compatBytesPerMin: number;
   };
   nodeEnv: string;
   nativeBindingsPath: string | undefined;
@@ -86,6 +104,13 @@ export function loadConfig(): Config {
       ),
       commitBatchSize: optionalInt("SFS_COMMIT_BATCH_SIZE", 20),
       commitFlushMs: optionalInt("SFS_COMMIT_FLUSH_MS", 2000),
+      compatibilityMode: {
+        enabled: optionalBool("SFS_COMPAT_MODE_ENABLED", true),
+        maxUploadBytes: optionalInt(
+          "SFS_COMPAT_MAX_UPLOAD_BYTES",
+          50 * 1024 * 1024
+        ),
+      },
     },
     rateLimit: {
       uploadsBurst: optionalInt("RATE_LIMIT_UPLOADS_BURST", 20),
@@ -93,6 +118,16 @@ export function loadConfig(): Config {
       bytesBurst: optionalInt("RATE_LIMIT_BYTES_BURST", 500 * 1024 * 1024),
       bytesPerMin: optionalInt("RATE_LIMIT_BYTES_PER_MIN", 200 * 1024 * 1024),
       ipUploadsPerMin: optionalInt("RATE_LIMIT_IP_UPLOADS_PER_MIN", 120),
+      compatUploadsBurst: optionalInt("RATE_LIMIT_COMPAT_UPLOADS_BURST", 10),
+      compatUploadsPerMin: optionalInt("RATE_LIMIT_COMPAT_UPLOADS_PER_MIN", 6),
+      compatBytesBurst: optionalInt(
+        "RATE_LIMIT_COMPAT_BYTES_BURST",
+        150 * 1024 * 1024
+      ),
+      compatBytesPerMin: optionalInt(
+        "RATE_LIMIT_COMPAT_BYTES_PER_MIN",
+        60 * 1024 * 1024
+      ),
     },
     nodeEnv: optionalEnv("NODE_ENV", "development"),
     nativeBindingsPath:
