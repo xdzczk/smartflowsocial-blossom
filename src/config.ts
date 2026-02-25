@@ -52,6 +52,7 @@ export interface Config {
       enabled: boolean;
       maxUploadBytes: number;
     };
+    readinessMaxPendingCommits: number;
   };
   rateLimit: {
     uploadsBurst: number;
@@ -66,6 +67,10 @@ export interface Config {
   };
   nodeEnv: string;
   nativeBindingsPath: string | undefined;
+  observability: {
+    metricsToken: string;
+    metricsAllowlist: string[];
+  };
 }
 
 let cached: Config | null = null;
@@ -78,6 +83,14 @@ export function loadConfig(): Config {
   const r2Endpoint = requireEnv("R2_ENDPOINT");
   const r2AccessKeyId = requireEnv("R2_ACCESS_KEY_ID");
   const r2SecretAccessKey = requireEnv("R2_SECRET_ACCESS_KEY");
+  const uploadTokenSecret = requireEnv("SFS_UPLOAD_TOKEN_SECRET");
+  const internalSecret = optionalEnv("SFS_INTERNAL_SECRET", "");
+  if (internalSecret && internalSecret === uploadTokenSecret) {
+    console.error(
+      "SFS_UPLOAD_TOKEN_SECRET must be distinct from SFS_INTERNAL_SECRET"
+    );
+    process.exit(1);
+  }
 
   cached = {
     dbPath,
@@ -95,11 +108,8 @@ export function loadConfig(): Config {
     ),
     sfs: {
       internalUrl: optionalEnv("SFS_INTERNAL_URL", ""),
-      internalSecret: optionalEnv("SFS_INTERNAL_SECRET", ""),
-      uploadTokenSecret: optionalEnv(
-        "SFS_UPLOAD_TOKEN_SECRET",
-        optionalEnv("SFS_INTERNAL_SECRET", "")
-      ),
+      internalSecret,
+      uploadTokenSecret,
       commitBatchUrl: optionalEnv(
         "SFS_COMMIT_BATCH_URL",
         `${optionalEnv("SFS_INTERNAL_URL", "").replace(/\/$/, "")}/internal/blossom/commit-batch`
@@ -118,6 +128,10 @@ export function loadConfig(): Config {
           50 * 1024 * 1024
         ),
       },
+      readinessMaxPendingCommits: optionalInt(
+        "SFS_READINESS_MAX_PENDING_COMMITS",
+        1000
+      ),
     },
     rateLimit: {
       uploadsBurst: optionalInt("RATE_LIMIT_UPLOADS_BURST", 20),
@@ -139,6 +153,13 @@ export function loadConfig(): Config {
     nodeEnv: optionalEnv("NODE_ENV", "development"),
     nativeBindingsPath:
       process.env["NATIVE_BINDINGS_PATH"]?.trim() ?? undefined,
+    observability: {
+      metricsToken: optionalEnv("METRICS_TOKEN", ""),
+      metricsAllowlist: optionalEnv("METRICS_ALLOWLIST", "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    },
   };
   return cached;
 }

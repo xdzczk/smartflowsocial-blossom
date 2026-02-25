@@ -1,7 +1,8 @@
-import type { Request, Response } from "express";
+import type { Response } from "express";
 
 import { ApiError } from "../errors.js";
 import * as storage from "../services/storage.js";
+import type { AppRequest } from "../types.js";
 
 function isValidBlobKey(key: string): boolean {
   if (!key || key.length === 0) return false;
@@ -10,7 +11,10 @@ function isValidBlobKey(key: string): boolean {
   return true;
 }
 
-export default async function head(req: Request, res: Response): Promise<void> {
+export default async function head(
+  req: AppRequest,
+  res: Response
+): Promise<void> {
   const key = req.params["key"];
   if (!key || !isValidBlobKey(key)) {
     throw new ApiError("Missing or invalid key", 400);

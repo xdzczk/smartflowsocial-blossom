@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "crypto";
+
 import type { Response } from "express";
 
 import { loadConfig } from "../config.js";
@@ -15,10 +17,17 @@ export default async function internalDelete(
     typeof secret === "string"
       ? secret
       : Array.isArray(secret)
-        ? secret[0]
+        ? (secret[0] ?? "")
         : "";
 
-  if (!cfg.sfs.internalSecret || provided !== cfg.sfs.internalSecret) {
+  const expectedSecret = cfg.sfs.internalSecret;
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expectedSecret);
+  const isValidSecret =
+    expectedSecret.length > 0 &&
+    providedBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(providedBuffer, expectedBuffer);
+  if (!isValidSecret) {
     throw new ApiError("Unauthorized", 401);
   }
 

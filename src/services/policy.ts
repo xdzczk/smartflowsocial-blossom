@@ -1,6 +1,8 @@
 import { loadConfig } from "../config.js";
 import { log } from "../logger.js";
 
+import { fetchJsonWithRetry } from "./http-client.js";
+
 interface CachedPolicy {
   expiresAtMs: number;
   result: CompatPolicyResult;
@@ -20,7 +22,8 @@ export function clearCompatPolicyCache(): void {
 }
 
 export async function getCompatPolicyForPubkey(
-  pubkey: string
+  pubkey: string,
+  options?: { requestId?: string }
 ): Promise<CompatPolicyResult> {
   const normalized = pubkey.trim().toLowerCase();
   if (!normalized) {
@@ -44,26 +47,29 @@ export async function getCompatPolicyForPubkey(
 
   try {
     const url = `${sfs.policyUrl.replace(/\/$/, "")}?pubkey=${encodeURIComponent(normalized)}`;
-    const response = await fetch(url, {
-      method: "GET",
+    const response = await fetchJsonWithRetry<{
+      active?: boolean;
+      planId?: string | null;
+      allowCompatUpload?: boolean;
+    }>(url, "GET", {
+      timeoutMs: 3_000,
+      retries: 2,
+      retryOnStatus: [408, 425, 429, 502, 503, 504],
+      requestId: options?.requestId,
       headers: {
         "x-internal-secret": sfs.internalSecret,
       },
     });
 
-    if (!response.ok) {
+    if (!response.ok || !response.data) {
       log.warn("Policy check failed: non-OK response", {
-        status: response.status,
+        status: response.status || 0,
         pubkeyLength: normalized.length,
       });
       return { state: "unavailable" };
     }
 
-    const data = (await response.json()) as {
-      active?: boolean;
-      planId?: string | null;
-      allowCompatUpload?: boolean;
-    };
+    const data = response.data;
     const allow = data.allowCompatUpload === true;
     const result: CompatPolicyResult = allow
       ? {

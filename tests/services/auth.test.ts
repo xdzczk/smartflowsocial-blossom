@@ -35,6 +35,7 @@ function createMockNext() {
 
 describe("authMiddleware", () => {
   beforeEach(() => {
+    process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
     resetConfig();
     verifySignatureMock.mockReset().mockReturnValue(true);
   });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
 
+import { resetConfig } from "../../src/config.js";
 import * as storage from "../../src/services/storage.js";
 
 const mockSend = vi.fn();
@@ -29,6 +30,13 @@ vi.mock("@aws-sdk/client-s3", () => ({
 
 describe("storage", () => {
   beforeEach(() => {
+    process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
+    process.env["R2_BUCKET"] = "test-bucket";
+    process.env["R2_ENDPOINT"] = "https://test.r2.dev";
+    process.env["R2_ACCESS_KEY_ID"] = "test-key";
+    process.env["R2_SECRET_ACCESS_KEY"] = "test-secret";
+    process.env["DB_PATH"] = "/tmp/vibe-cdn-storage-test";
+    resetConfig();
     storage.__resetR2ClientForTesting();
     mockSend.mockReset();
   });

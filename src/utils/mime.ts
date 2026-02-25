@@ -8,7 +8,9 @@ export function isAllowedMime(mimeType: string): boolean {
 }
 
 export function getExtension(mimeType: string): string | null {
-  return mime.getExtension(mimeType);
+  const ext = mime.getExtension(mimeType);
+  if (ext === "jpeg") return "jpg";
+  return ext;
 }
 
 export function getType(pathOrExt: string): string | null {

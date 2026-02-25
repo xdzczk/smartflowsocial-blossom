@@ -9,6 +9,7 @@ import {
 describe("rate-limit lanes", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
     process.env["RATE_LIMIT_UPLOADS_BURST"] = "1";
     process.env["RATE_LIMIT_UPLOADS_PER_MIN"] = "1";
     process.env["RATE_LIMIT_BYTES_BURST"] = "100";

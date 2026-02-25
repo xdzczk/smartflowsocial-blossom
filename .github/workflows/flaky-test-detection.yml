@@ -1,0 +1,53 @@
+name: Flaky Test Detection
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Number of repeated runs
+        required: false
+        default: "10"
+
+jobs:
+  flaky-detection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Re-run unit tests repeatedly
+        run: |
+          TOTAL_RUNS="${{ inputs.runs || '10' }}"
+          PASS_COUNT=0
+          FAIL_COUNT=0
+          for i in $(seq 1 "$TOTAL_RUNS"); do
+            echo "Run $i/$TOTAL_RUNS"
+            if pnpm test:unit; then
+              PASS_COUNT=$((PASS_COUNT + 1))
+            else
+              FAIL_COUNT=$((FAIL_COUNT + 1))
+            fi
+          done
+          echo "passes=$PASS_COUNT" >> "$GITHUB_OUTPUT"
+          echo "fails=$FAIL_COUNT" >> "$GITHUB_OUTPUT"
+        id: reruns
+
+      - name: Publish flaky summary
+        run: |
+          echo "## Flaky Detection Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Passes: ${{ steps.reruns.outputs.passes }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Fails: ${{ steps.reruns.outputs.fails }}" >> "$GITHUB_STEP_SUMMARY"

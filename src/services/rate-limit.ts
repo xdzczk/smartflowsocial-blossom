@@ -3,6 +3,7 @@ import { loadConfig } from "../config.js";
 interface TokenBucketState {
   tokens: number;
   lastRefillMs: number;
+  lastSeenMs: number;
 }
 
 const pubkeyUploadBuckets = new Map<string, TokenBucketState>();
@@ -10,6 +11,29 @@ const pubkeyBytesBuckets = new Map<string, TokenBucketState>();
 const compatPubkeyUploadBuckets = new Map<string, TokenBucketState>();
 const compatPubkeyBytesBuckets = new Map<string, TokenBucketState>();
 const ipBuckets = new Map<string, TokenBucketState>();
+const BUCKET_IDLE_TTL_MS = 15 * 60 * 1000;
+let lastSweepMs = 0;
+
+function sweepExpiredBuckets(
+  map: Map<string, TokenBucketState>,
+  nowMs: number
+): void {
+  for (const [key, state] of map.entries()) {
+    if (nowMs - state.lastSeenMs > BUCKET_IDLE_TTL_MS) {
+      map.delete(key);
+    }
+  }
+}
+
+function maybeSweepBuckets(nowMs: number): void {
+  if (nowMs - lastSweepMs < 60_000) return;
+  lastSweepMs = nowMs;
+  sweepExpiredBuckets(pubkeyUploadBuckets, nowMs);
+  sweepExpiredBuckets(pubkeyBytesBuckets, nowMs);
+  sweepExpiredBuckets(compatPubkeyUploadBuckets, nowMs);
+  sweepExpiredBuckets(compatPubkeyBytesBuckets, nowMs);
+  sweepExpiredBuckets(ipBuckets, nowMs);
+}
 
 function refillBucket(
   bucket: TokenBucketState,
@@ -31,11 +55,13 @@ function consumeTokens(
   refillPerSecond: number
 ): { allowed: boolean; retryAfterSec: number } {
   const now = Date.now();
+  maybeSweepBuckets(now);
   let bucket = map.get(key);
   if (!bucket) {
-    bucket = { tokens: capacity, lastRefillMs: now };
+    bucket = { tokens: capacity, lastRefillMs: now, lastSeenMs: now };
     map.set(key, bucket);
   }
+  bucket.lastSeenMs = now;
 
   refillBucket(bucket, now, capacity, refillPerSecond);
   if (bucket.tokens >= amount) {

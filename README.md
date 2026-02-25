@@ -1,111 +1,216 @@
 # SmartFlow Blossom Gateway
 
-A minimal [Blossom](https://github.com/hzrd149/blossom)-compatible media gateway for
-SmartFlowSocial. It stores blobs in Cloudflare R2 and gates uploads on an external subscription
-check. Authentication uses Nostr Blossom auth (kind 24242). This gateway can be used as the backend
-for products like Satellite CDN.
+Production-ready, Blossom-compatible media gateway for SmartFlowSocial.
+
+This service accepts authenticated uploads, validates payload integrity, stores media in Cloudflare
+R2, and synchronizes authoritative upload events to SmartFlow internal services. It also supports a
+compatibility lane for Blossom clients that do not yet provide SmartFlow upload tokens.
+
+## Why This Exists
+
+- Provide a lightweight, dedicated media ingestion service.
+- Enforce security and subscription policy at upload time.
+- Keep blob storage in R2 while maintaining reliable internal commit semantics.
+- Offer compatibility for existing Blossom ecosystem clients.
+
+## Core Capabilities
+
+- Dual upload lanes:
+  - **Authoritative lane** via `X-SFS-Upload-Token`
+  - **Compatibility lane** via Blossom auth only (policy-gated)
+- Streamed upload with SHA-256 verification and MIME enforcement.
+- Replay protection using token JTI persistence.
+- Retryable commit reconciliation for upstream callback failures.
+- Health/readiness endpoints and Prometheus-style metrics output.
+
+## Architecture at a Glance
+
+```mermaid
+flowchart TD
+  client[Client] --> gateway[Gateway API]
+  gateway --> auth[Auth and Token Validation]
+  gateway --> policy[Compat Policy Check]
+  gateway --> r2[Cloudflare R2]
+  gateway --> sqlite[SQLite Metadata DB]
+  gateway --> commit[Commit Batch Callback]
+  commit --> smartflow[SmartFlow Internal Services]
+```
 
 ## Requirements
 
-- Node.js >= 20
-- [Cloudflare R2](https://www.cloudflare.com/developer-platform/r2/) bucket and API credentials
-- (Optional) SmartFlow subscription service for upload gating
+- Node.js `>=20`
+- `pnpm` (project uses `pnpm@10.27.0`)
+- Cloudflare R2 bucket + credentials
+- Optional SmartFlow internal endpoints (commit/policy) for full authoritative behavior
 
-## Quick start
+## Quick Start
 
 ```bash
 pnpm install
-cp .env.example .env   # edit with your values
+cp .env.example .env
+# edit .env
 pnpm build
 pnpm start
 ```
 
-## Environment variables
+Service defaults to port `5050`.
 
-| Variable                            | Required | Default                                             | Description                                                                                                                    |
-| ----------------------------------- | -------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `DB_PATH`                           | Yes      | —                                                   | Directory for the SQLite database file                                                                                         |
-| `R2_BUCKET`                         | Yes      | —                                                   | R2 bucket name                                                                                                                 |
-| `R2_ENDPOINT`                       | Yes      | —                                                   | R2 endpoint URL (e.g. `https://<account>.r2.cloudflarestorage.com`)                                                            |
-| `R2_ACCESS_KEY_ID`                  | Yes      | —                                                   | R2 access key ID                                                                                                               |
-| `R2_SECRET_ACCESS_KEY`              | Yes      | —                                                   | R2 secret access key                                                                                                           |
-| `PORT`                              | No       | `5050`                                              | HTTP server port                                                                                                               |
-| `AUTH_TOLERANCE_SECONDS`            | No       | `0`                                                 | Clock skew tolerance for Blossom auth (seconds)                                                                                |
-| `BLOSSOM_PUBLIC_URL`                | No       | `https://blossom.smartflow.social`                  | Base URL returned in upload responses for blob URLs                                                                            |
-| `SFS_INTERNAL_URL`                  | No\*     | —                                                   | SmartFlow app base URL for commit callbacks (e.g. `https://app.smartflow.social`). Must be reachable from this server.         |
-| `SFS_INTERNAL_SECRET`               | No\*     | —                                                   | Must match SmartFlow app env `BLOSSOM_INTERNAL_SECRET`. Used for internal commit auth header.                                  |
-| `SFS_UPLOAD_TOKEN_SECRET`           | No\*     | `SFS_INTERNAL_SECRET`                               | HMAC secret used to verify `X-SFS-Upload-Token` JWTs. Must match SmartFlow `BLOSSOM_UPLOAD_TOKEN_SECRET` (or fallback secret). |
-| `SFS_COMMIT_BATCH_URL`              | No       | `${SFS_INTERNAL_URL}/internal/blossom/commit-batch` | Internal SmartFlow commit endpoint.                                                                                            |
-| `SFS_COMMIT_BATCH_SIZE`             | No       | `20`                                                | Buffered commit flush threshold (items).                                                                                       |
-| `SFS_COMMIT_FLUSH_MS`               | No       | `2000`                                              | Buffered commit flush interval (milliseconds).                                                                                 |
-| `SFS_POLICY_URL`                    | No       | `${SFS_INTERNAL_URL}/internal/blossom/policy`       | Internal SmartFlow policy endpoint for compatibility lane plan gating.                                                         |
-| `SFS_POLICY_CACHE_TTL_SEC`          | No       | `90`                                                | In-memory cache TTL (seconds) for compat policy lookups.                                                                       |
-| `SFS_COMPAT_MODE_ENABLED`           | No       | `true`                                              | Allow compatibility uploads with Blossom auth and no `X-SFS-Upload-Token` (non-authoritative lane).                            |
-| `SFS_COMPAT_MAX_UPLOAD_BYTES`       | No       | `52428800`                                          | Max bytes accepted by compatibility lane (`50MB`, hard-capped by server max).                                                  |
-| `RATE_LIMIT_UPLOADS_BURST`          | No       | `20`                                                | Uploads token-bucket burst per pubkey.                                                                                         |
-| `RATE_LIMIT_UPLOADS_PER_MIN`        | No       | `10`                                                | Uploads token-bucket refill rate per minute per pubkey.                                                                        |
-| `RATE_LIMIT_BYTES_BURST`            | No       | `524288000`                                         | Bytes token-bucket burst per pubkey.                                                                                           |
-| `RATE_LIMIT_BYTES_PER_MIN`          | No       | `209715200`                                         | Bytes token-bucket refill rate per minute per pubkey.                                                                          |
-| `RATE_LIMIT_IP_UPLOADS_PER_MIN`     | No       | `120`                                               | Cheap IP pre-limit per minute.                                                                                                 |
-| `RATE_LIMIT_COMPAT_UPLOADS_BURST`   | No       | `10`                                                | Compatibility lane upload burst per pubkey.                                                                                    |
-| `RATE_LIMIT_COMPAT_UPLOADS_PER_MIN` | No       | `6`                                                 | Compatibility lane upload refill per minute per pubkey.                                                                        |
-| `RATE_LIMIT_COMPAT_BYTES_BURST`     | No       | `157286400`                                         | Compatibility lane bytes burst (`150MB`) per pubkey.                                                                           |
-| `RATE_LIMIT_COMPAT_BYTES_PER_MIN`   | No       | `62914560`                                          | Compatibility lane bytes refill (`60MB/min`) per pubkey.                                                                       |
-| `NODE_ENV`                          | No       | `development`                                       | Environment name                                                                                                               |
-| `NATIVE_BINDINGS_PATH`              | No       | —                                                   | Path to directory containing `arm64/` or `x64/better_sqlite3.node` for better-sqlite3                                          |
+## Local Development
 
-For Blossom v2 token + commit flow, configure **both** `SFS_INTERNAL_SECRET` and a shared token
-secret (`SFS_UPLOAD_TOKEN_SECRET` or fallback `SFS_INTERNAL_SECRET`) plus `SFS_INTERNAL_URL`. If
-commit endpoint configuration is missing/unreachable, uploads are accepted and queued for
-reconciliation retries.
+```bash
+pnpm dev
+```
 
-## Operations
+Validation and test commands:
 
-### Running
+```bash
+pnpm validate
+pnpm test
+pnpm test:coverage
+pnpm test:unit
+pnpm test:integration
+pnpm test:security
+pnpm test:property
+pnpm test:performance
+```
 
-- **Build:** `pnpm build` — compiles TypeScript to `build/index.js`
-- **Start:** `pnpm start` — runs the server (requires env to be set)
-- **Dev:** `pnpm dev` — build in watch mode (no auto-restart of node)
+## Configuration
 
-### Health and readiness
+### Required Variables
 
-- **GET /health** — Liveness probe. Always returns 200 when the process is up.
-- **GET /ready** — Readiness probe. Returns 200 if the database is responsive, 503 otherwise. Use
-  for load balancers and orchestrators.
+| Variable                  | Description                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| `DB_PATH`                 | Directory containing the SQLite DB file.                                         |
+| `R2_BUCKET`               | R2 bucket name.                                                                  |
+| `R2_ENDPOINT`             | R2 API endpoint (for example `https://<account>.r2.cloudflarestorage.com`).      |
+| `R2_ACCESS_KEY_ID`        | R2 access key ID.                                                                |
+| `R2_SECRET_ACCESS_KEY`    | R2 secret access key.                                                            |
+| `SFS_UPLOAD_TOKEN_SECRET` | HMAC secret for upload token verification. Must not match `SFS_INTERNAL_SECRET`. |
 
-### Rate limiting
+### Important Optional Variables
 
-Uploads use in-memory token buckets:
+| Variable                            | Default                            | Description                                       |
+| ----------------------------------- | ---------------------------------- | ------------------------------------------------- |
+| `PORT`                              | `5050`                             | HTTP listen port.                                 |
+| `AUTH_TOLERANCE_SECONDS`            | `0`                                | Allowed auth clock skew in seconds.               |
+| `BLOSSOM_PUBLIC_URL`                | `https://blossom.smartflow.social` | Base URL returned in upload responses.            |
+| `SFS_INTERNAL_URL`                  | empty                              | Base URL for internal SmartFlow callbacks.        |
+| `SFS_INTERNAL_SECRET`               | empty                              | Shared secret for internal endpoints.             |
+| `SFS_COMMIT_BATCH_URL`              | derived                            | Commit callback endpoint.                         |
+| `SFS_POLICY_URL`                    | derived                            | Compatibility policy endpoint.                    |
+| `SFS_POLICY_CACHE_TTL_SEC`          | `90`                               | Compat policy cache TTL seconds.                  |
+| `SFS_COMPAT_MODE_ENABLED`           | `true`                             | Enable compatibility upload lane.                 |
+| `SFS_COMPAT_MAX_UPLOAD_BYTES`       | `52428800`                         | Max bytes for compat lane (50MB default).         |
+| `SFS_READINESS_MAX_PENDING_COMMITS` | `1000`                             | Readiness threshold for retryable commit backlog. |
+| `RATE_LIMIT_*`                      | varies                             | Upload/IP/byte token-bucket limits.               |
+| `METRICS_TOKEN`                     | empty                              | Token gate for `/metrics` access.                 |
+| `METRICS_ALLOWLIST`                 | empty                              | Comma-separated IP allowlist for `/metrics`.      |
+| `NATIVE_BINDINGS_PATH`              | empty                              | Optional path to better-sqlite3 native bindings.  |
 
-- Per-pubkey uploads/min (burst + refill)
-- Per-pubkey bytes/min (burst + refill)
-- Separate per-pubkey buckets for compatibility lane
-- Cheap IP uploads/min pre-check
-
-Limits are currently per-process; multi-instance shared limiting requires an external store.
-
-### Reverse proxy
-
-If you use Nginx or similar, increase the max body size (e.g. 250MB) so large uploads do not fail.
+See `.env.example` for the full list.
 
 ## API
 
-- **PUT /upload** — dual lane behavior:
-  - **Authoritative lane**: include `X-SFS-Upload-Token` (optional Blossom auth header). Token is
-    validated, upload is streamed + SHA-256 verified, object stored to R2, commit buffered to
-    SmartFlow `/internal/blossom/commit-batch`, quota/accounting authoritative.
-  - **Compatibility lane**: no token, valid Blossom auth required; upload is accepted under stricter
-    compat limits, internal plan policy gate, and persisted as non-authoritative compat metadata.
-    Free/inactive users are denied with `subscription_required`; policy lookup failures are
-    fail-closed with `service_unavailable`. Response includes `url`, `sha256`, `x`, `size`, `type`,
-    `m`.
-- **HEAD /:key** — Returns 200 with `Content-Type` and `Content-Length` if the blob exists, 404
-  otherwise. No auth.
-- **DELETE /:key** — Blossom auth required; `t` tag must be `delete`; only the owning pubkey can
-  delete.
-- **DELETE /internal/blob/:key** — Internal server-to-server delete by key (for SmartFlow app media
-  cleanup). Requires `x-internal-secret` matching `SFS_INTERNAL_SECRET`.
+### `PUT /upload`
+
+Upload endpoint with two modes:
+
+- **Authoritative lane**
+  - Requires `X-SFS-Upload-Token`
+  - Optionally accepts Blossom auth header (must match token subject if present)
+  - Validates hash/size/type expectations from token context
+  - Persists blob metadata and enqueues authoritative commit
+
+- **Compatibility lane**
+  - No upload token header
+  - Requires valid Blossom auth
+  - Policy-gated via internal policy endpoint
+  - Uses stricter size/rate controls
+  - Stores compat metadata only
+
+Response includes:
+
+- `url`
+- `sha256`
+- `size`
+- `type`
+- compatibility keys `x` and `m`
+
+### `HEAD /:key`
+
+Returns object metadata if present:
+
+- `200` with `Content-Type` and `Content-Length`
+- `404` if missing
+
+### `DELETE /:key`
+
+- Requires Blossom auth with `t=delete`
+- Delete allowed only for object owner pubkey
+- Returns `204`
+
+### `DELETE /internal/blob/:key`
+
+- Internal/admin delete path
+- Requires `x-internal-secret`
+- Returns success payload
+
+### Operational Endpoints
+
+- `GET /health` - liveness
+- `GET /ready` - dependency-aware readiness (DB, storage, policy status, backlog)
+- `GET /metrics` - Prometheus-style metrics, protected by token/allowlist
+
+## Security Model
+
+- Upload token and internal secret are explicitly separated.
+- JTI replay protection is persisted in SQLite.
+- Integrity validation includes streamed SHA-256 checks.
+- MIME validation restricts uploads to image/video classes.
+- Metrics endpoint is access-controlled (`METRICS_TOKEN` and/or `METRICS_ALLOWLIST`).
+
+More:
+
+- `SECURITY.md`
+- `docs/security/threat-model.md`
+- `docs/security/operational-security-checklist.md`
+
+## Reliability and Operations
+
+- Commit callbacks are retried via durable reconciliation queue.
+- Graceful shutdown flushes commit state before exit (with timeout guard).
+- Readiness reflects operational dependency health, not process liveness only.
+
+Runbooks and SLOs:
+
+- `docs/slo-and-ops.md`
+- `docs/ops/slos.md`
+- `docs/ops/runbook.md`
+- `docs/ops/backup-recovery.md`
+
+## CI/CD and Quality Gates
+
+Repository includes workflows for:
+
+- CI quality gates
+- PR checks
+- coverage reporting
+- matrix testing
+- flaky test detection
+- release security checks
+- container image build/publish
+
+Each PR is expected to pass lint, typecheck, tests, and coverage constraints.
+
+## Contributing
+
+See:
+
+- `CONTRIBUTING.md`
+- `docs/development/developer-guide.md`
+- `docs/architecture/boundaries.md`
+- `docs/meta/style-guide.md`
 
 ## License
 
-MIT.
+MIT

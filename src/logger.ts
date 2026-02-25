@@ -6,6 +6,7 @@ function logLine(
   fields?: Record<string, unknown>
 ): void {
   const line = {
+    ts: new Date().toISOString(),
     level,
     msg,
     ...fields,

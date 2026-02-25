@@ -20,6 +20,12 @@ import {
   startCommitReconciliation,
 } from "./services/commit.js";
 import Database from "./services/db.js";
+import {
+  incrementCounter,
+  observeHistogram,
+  renderMetrics,
+  setGauge,
+} from "./services/telemetry.js";
 import type { AppInstance, AppRequest } from "./types.js";
 
 function requestIdMiddleware(
@@ -30,7 +36,7 @@ function requestIdMiddleware(
   const raw = req.headers["x-request-id"];
   const id =
     typeof raw === "string" && raw.trim() ? raw.trim() : crypto.randomUUID();
-  (req as unknown as AppRequest).id = id;
+  req.id = id;
   next();
 }
 
@@ -40,9 +46,12 @@ function errorHandler(
   res: express.Response,
   _next: express.NextFunction
 ): void {
-  const appReq = req as unknown as AppRequest;
-  const requestId = appReq.id ?? "unknown";
+  const requestId = req.id ?? "unknown";
   if (err instanceof ApiError) {
+    incrementCounter("gateway_api_error_total", {
+      error: err.error,
+      code: err.code,
+    });
     const body: Record<string, unknown> = {
       error: err.error,
       message: err.message,
@@ -58,6 +67,7 @@ function errorHandler(
     requestId,
     err: err instanceof Error ? err.message : String(err),
   });
+  incrementCounter("gateway_unhandled_error_total");
   if (err instanceof Error && err.stack) {
     log.error("Stack", { requestId, stack: err.stack });
   }
@@ -77,7 +87,7 @@ function asyncHandler(
   ) => {
     void (async () => {
       try {
-        await fn(req as unknown as AppRequest, res);
+        await fn(req as AppRequest, res);
       } catch (e) {
         next(e);
       }
@@ -86,6 +96,27 @@ function asyncHandler(
 }
 
 const TEMP_DIR = "/tmp/sfs-blossom";
+const SHUTDOWN_FLUSH_TIMEOUT_MS = 8_000;
+
+function isMetricsRequestAllowed(
+  req: express.Request,
+  metricsToken: string,
+  metricsAllowlist: string[]
+): boolean {
+  const requesterIp =
+    (typeof req.headers["x-forwarded-for"] === "string"
+      ? req.headers["x-forwarded-for"].split(",")[0]?.trim()
+      : undefined) ??
+    req.ip ??
+    "";
+  if (metricsAllowlist.length > 0 && metricsAllowlist.includes(requesterIp)) {
+    return true;
+  }
+  if (!metricsToken) return metricsAllowlist.length === 0;
+  const provided = req.headers["x-metrics-token"];
+  const token = typeof provided === "string" ? provided : "";
+  return token.length > 0 && token === metricsToken;
+}
 
 export async function start(): Promise<void> {
   dotenv.config();
@@ -93,19 +124,33 @@ export async function start(): Promise<void> {
 
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-  const app = express() as unknown as express.Application & AppInstance;
+  const app = express() as express.Application & AppInstance;
   app.use(morgan("tiny"));
   app.use(cors());
   app.use(requestIdMiddleware);
+  app.use((req, res, next) => {
+    const started = performance.now();
+    res.on("finish", () => {
+      incrementCounter("gateway_http_requests_total", {
+        method: req.method,
+        route: req.path || "unknown",
+        status: res.statusCode,
+      });
+      observeHistogram(
+        "gateway_http_request_duration_ms",
+        performance.now() - started,
+        {
+          method: req.method,
+          route: req.path || "unknown",
+        }
+      );
+    });
+    next();
+  });
 
   app.db = new Database({
     dbPath: config.dbPath,
     nativeBindingsPath: config.nativeBindingsPath,
-  });
-
-  app.use((req: express.Request, _res, next) => {
-    (req as unknown as AppRequest).app = app;
-    next();
   });
 
   app.use(createHealthRouter(app));
@@ -113,21 +158,30 @@ export async function start(): Promise<void> {
   const commitReconcileInterval = startCommitReconciliation(app);
 
   app.put("/upload", asyncHandler(uploadRoute));
-  app.head(
-    "/:key",
-    asyncHandler(
-      headRoute as unknown as (
-        req: AppRequest,
-        res: express.Response
-      ) => Promise<void>
-    )
-  );
+  app.head("/:key", asyncHandler(headRoute));
   app.delete(
     "/:key",
-    authMiddleware as unknown as express.RequestHandler,
+    authMiddleware as express.RequestHandler,
     asyncHandler(deleteRoute)
   );
   app.delete("/internal/blob/:key", asyncHandler(internalDeleteRoute));
+  app.get("/metrics", (req, res) => {
+    if (
+      !isMetricsRequestAllowed(
+        req,
+        config.observability.metricsToken,
+        config.observability.metricsAllowlist
+      )
+    ) {
+      res.status(401).json({ message: "Unauthorized metrics access" });
+      return;
+    }
+    setGauge(
+      "gateway_pending_commits",
+      app.db.countRetryableUncommitted(Math.floor(Date.now() / 1000))
+    );
+    res.type("text/plain").send(renderMetrics());
+  });
 
   app.use((_req, res) => {
     res.status(404).send();
@@ -140,17 +194,41 @@ export async function start(): Promise<void> {
     log.info("Listening", { host, port: config.port });
   });
 
-  function shutdown(signal: string): void {
+  let shuttingDown = false;
+
+  async function shutdown(signal: string): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log.info("Shutting down", { signal });
     clearInterval(commitReconcileInterval);
-    void flushCommitBuffer(app);
-    server.close(() => {
+    const flushResult = await Promise.race([
+      flushCommitBuffer(app).then(() => "flushed"),
+      new Promise<"timed_out">((resolve) => {
+        setTimeout(() => resolve("timed_out"), SHUTDOWN_FLUSH_TIMEOUT_MS);
+      }),
+    ]);
+    if (flushResult === "timed_out") {
+      log.warn("Commit flush timed out during shutdown", {
+        timeoutMs: SHUTDOWN_FLUSH_TIMEOUT_MS,
+      });
+    }
+
+    server.close((err?: Error) => {
+      if (err) {
+        log.error("Server close failed", { err: err.message });
+        process.exit(1);
+        return;
+      }
       app.db.close();
       log.info("Server closed");
       process.exit(0);
     });
   }
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
 }

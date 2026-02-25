@@ -219,6 +219,17 @@ class Database {
       .all(now, limit) as UncommittedRow[];
   }
 
+  countRetryableUncommitted(now = Math.floor(Date.now() / 1000)): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(1) as count
+         FROM uncommitted_uploads
+         WHERE next_retry_at <= ?`
+      )
+      .get(now) as { count?: number } | undefined;
+    return row?.count ?? 0;
+  }
+
   markUncommittedSuccess(id: number): void {
     this.db.prepare(`DELETE FROM uncommitted_uploads WHERE id = ?`).run(id);
   }

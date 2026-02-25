@@ -51,6 +51,20 @@ export function verifyUploadToken(rawToken: string): UploadTokenPayload {
     throw new ApiError("Invalid upload token", 401, { error: "invalid_token" });
   }
 
+  const header = JSON.parse(
+    base64UrlToBuffer(encodedHeader).toString("utf8")
+  ) as { alg?: string; typ?: string };
+  if (header.alg !== "HS256") {
+    throw new ApiError("Unsupported upload token algorithm", 401, {
+      error: "invalid_token",
+    });
+  }
+  if (header.typ && header.typ !== "JWT") {
+    throw new ApiError("Invalid upload token type", 401, {
+      error: "invalid_token",
+    });
+  }
+
   const content = `${encodedHeader}.${encodedPayload}`;
   if (!verifySignature(content, encodedSig, secret)) {
     throw new ApiError("Invalid upload token signature", 401, {
@@ -63,6 +77,16 @@ export function verifyUploadToken(rawToken: string): UploadTokenPayload {
   ) as UploadTokenPayload;
 
   const now = Math.floor(Date.now() / 1000);
+  if (!payload.iat || payload.iat > now + 60) {
+    throw new ApiError("Invalid upload token issue time", 401, {
+      error: "invalid_token",
+    });
+  }
+  if (now - payload.iat > 86_400) {
+    throw new ApiError("Upload token too old", 401, {
+      error: "invalid_token",
+    });
+  }
   if (!payload.exp || payload.exp <= now) {
     throw new ApiError("Upload token expired", 401, { error: "token_expired" });
   }

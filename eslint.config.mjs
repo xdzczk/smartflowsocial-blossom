@@ -66,6 +66,29 @@ const importOrderRule = [
   },
 ];
 
+const featureBoundaryRestrictions = [
+  {
+    target: "src/routes/**/*",
+    from: "src/routes/**/*",
+    message: "Route handlers should not depend on other route handlers.",
+  },
+  {
+    target: "src/services/**/*",
+    from: "src/routes/**/*",
+    message: "Services must not import route modules.",
+  },
+  {
+    target: "src/utils/**/*",
+    from: "src/routes/**/*",
+    message: "Utils must remain route-agnostic.",
+  },
+  {
+    target: "src/utils/**/*",
+    from: "src/services/**/*",
+    message: "Utils must remain service-agnostic and side-effect free.",
+  },
+];
+
 const qualityRules = {
   "promise/always-return": "warn",
   "promise/catch-or-return": "warn",
@@ -127,6 +150,10 @@ export default [
       ...tier1Rules,
       ...tier2Rules,
       "import/order": importOrderRule,
+      "import/no-restricted-paths": [
+        "error",
+        { zones: featureBoundaryRestrictions },
+      ],
       "no-console": ["error", { allow: ["error", "warn", "info"] }],
       ...qualityRules,
     },

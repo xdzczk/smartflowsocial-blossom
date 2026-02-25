@@ -5,13 +5,23 @@ import { loadConfig } from "../config.js";
 import { ApiError } from "../errors.js";
 import type { BlossomAuth, AppRequest } from "../types.js";
 
+function parseEncodedAuthPayload(authorization: string): string {
+  const [schemeRaw, encoded] = authorization.trim().split(/\s+/, 2);
+  const scheme = schemeRaw?.toLowerCase();
+  if (!encoded || (scheme !== "nostr" && scheme !== "bearer")) {
+    throw new ApiError("Invalid auth header format", 401, {
+      error: "invalid_token",
+    });
+  }
+  return Buffer.from(encoded, "base64").toString();
+}
+
 export function parseBlossomAuthorizationHeader(authorization: string): {
   auth: BlossomAuth;
   verb?: string;
 } {
-  const auth = JSON.parse(
-    Buffer.from(authorization.split(" ")[1] ?? "", "base64").toString()
-  ) as BlossomAuth;
+  const rawPayload = parseEncodedAuthPayload(authorization);
+  const auth = JSON.parse(rawPayload) as BlossomAuth;
 
   const authTolerance = loadConfig().authToleranceSeconds;
   const now = Math.floor(Date.now() / 1000);

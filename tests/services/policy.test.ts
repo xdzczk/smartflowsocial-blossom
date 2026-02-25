@@ -11,6 +11,7 @@ describe("compat policy service", () => {
 
   beforeEach(() => {
     vi.unstubAllEnvs();
+    process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
     process.env["SFS_INTERNAL_URL"] = "https://smartflow.example";
     process.env["SFS_INTERNAL_SECRET"] = "secret123";
     process.env["SFS_POLICY_URL"] =

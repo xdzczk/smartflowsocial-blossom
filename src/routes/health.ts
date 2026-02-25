@@ -1,5 +1,8 @@
 import express from "express";
 
+import { loadConfig } from "../config.js";
+import { fetchJsonWithRetry } from "../services/http-client.js";
+import { headObject } from "../services/storage.js";
 import type { AppInstance } from "../types.js";
 
 export function createHealthRouter(
@@ -9,12 +12,57 @@ export function createHealthRouter(
   router.get("/health", (_req, res) => {
     res.status(200).send("OK");
   });
+
   router.get("/ready", (_req, res) => {
-    if (app.db.ping()) {
-      res.status(200).end();
-    } else {
-      res.status(503).end();
-    }
+    void (async () => {
+      const config = loadConfig();
+      const checks: Record<string, unknown> = {
+        db: app.db.ping(),
+        storage: false,
+        pendingCommits: app.db.countRetryableUncommitted(),
+        policy: "not_configured",
+      };
+
+      if (config.nodeEnv === "test") {
+        checks["storage"] = true;
+      } else {
+        try {
+          await headObject("__readiness_probe__");
+          checks["storage"] = true;
+        } catch {
+          checks["storage"] = false;
+        }
+      }
+
+      if (config.sfs.policyUrl && config.sfs.internalSecret) {
+        const response = await fetchJsonWithRetry<unknown>(
+          `${config.sfs.policyUrl.replace(/\/$/, "")}?pubkey=readiness_probe`,
+          "GET",
+          {
+            timeoutMs: 1_500,
+            retries: 0,
+            headers: {
+              "x-internal-secret": config.sfs.internalSecret,
+            },
+          }
+        );
+        checks["policy"] = response.ok ? "ok" : "unavailable";
+      }
+
+      const pendingCommits = checks["pendingCommits"] as number;
+      const ready =
+        checks["db"] === true &&
+        checks["storage"] === true &&
+        pendingCommits <= config.sfs.readinessMaxPendingCommits &&
+        checks["policy"] !== "unavailable";
+
+      if (ready) {
+        res.status(200).json({ status: "ready", checks });
+        return;
+      }
+
+      res.status(503).json({ status: "not_ready", checks });
+    })();
   });
   return router;
 }

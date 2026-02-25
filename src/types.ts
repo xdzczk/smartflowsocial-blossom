@@ -34,10 +34,18 @@ export interface AppInstance {
   db: Database;
 }
 
-/** Request with app, optional blossom, and request ID (override Express Request.app) */
-export type AppRequest = Omit<Request, "app"> & {
+declare global {
+  namespace Express {
+    interface Application extends AppInstance {}
+    interface Request {
+      blossom?: BlossomContext;
+      uploadToken?: UploadTokenContext;
+      id?: string;
+    }
+  }
+}
+
+/** Request with gateway extensions. */
+export type AppRequest = Request & {
   app: AppInstance;
-  blossom?: BlossomContext;
-  uploadToken?: UploadTokenContext;
-  id?: string;
 };

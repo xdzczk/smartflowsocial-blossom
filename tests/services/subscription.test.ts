@@ -7,6 +7,7 @@ describe("verifySubscription", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
+    process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
     resetConfig();
     vi.stubGlobal("fetch", fetchMock);
     process.env["SFS_INTERNAL_URL"] = "https://sfs.example";
@@ -52,6 +53,7 @@ describe("verifySubscription", () => {
 
   it("returns false when SFS_INTERNAL_URL is empty", async () => {
     delete process.env["SFS_INTERNAL_URL"];
+    process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
     resetConfig();
     fetchMock.mockClear();
     const result = await verifySubscription("pk");
@@ -61,6 +63,7 @@ describe("verifySubscription", () => {
 
   it("returns false when SFS_INTERNAL_SECRET is empty", async () => {
     delete process.env["SFS_INTERNAL_SECRET"];
+    process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
     resetConfig();
     fetchMock.mockClear();
     const result = await verifySubscription("pk");

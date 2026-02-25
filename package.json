@@ -15,6 +15,11 @@
   },
   "scripts": {
     "test": "vitest run",
+    "test:unit": "vitest run tests/services tests/routes tests/utils tests/errors.test.ts tests/server.test.ts",
+    "test:integration": "vitest run tests/integration",
+    "test:security": "vitest run tests/security",
+    "test:property": "vitest run tests/property",
+    "test:performance": "vitest run tests/performance",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "build": "esbuild --platform=node --format=esm ./src/index.ts --outdir=build --bundle --packages=external",
@@ -27,6 +32,7 @@
     "typecheck": "tsc --noEmit",
     "precheck": "pnpm lint && pnpm exec tsc --noEmit",
     "validate": "pnpm format:check && pnpm lint:ci && pnpm typecheck",
+    "ci:test": "pnpm validate && pnpm test && pnpm test:coverage && pnpm build",
     "prepare": "husky",
     "clean": "rm -rf build node_modules/.cache .tsbuildinfo"
   },
