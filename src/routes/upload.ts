@@ -12,6 +12,7 @@ import { ApiError } from "../errors.js";
 import { log } from "../logger.js";
 import { parseBlossomAuthorizationHeader } from "../services/auth.js";
 import { enqueueCommitItem } from "../services/commit.js";
+import { getCompatPolicyForPubkey } from "../services/policy.js";
 import {
   enforceCompatPubkeyRateLimits,
   enforceIpRateLimit,
@@ -188,6 +189,20 @@ export default async function upload(
             config.sfs.compatibilityMode.maxUploadBytes
           )
         : MAX_UPLOAD_BYTES;
+
+    if (lane === "compat") {
+      const compatPolicy = await getCompatPolicyForPubkey(context.pubkey);
+      if (compatPolicy.state === "unavailable") {
+        throw new ApiError("Policy service unavailable", 503, {
+          error: "service_unavailable",
+        });
+      }
+      if (compatPolicy.state !== "allow") {
+        throw new ApiError("Subscription required", 403, {
+          error: "subscription_required",
+        });
+      }
+    }
 
     const headerLenRaw = req.headers["content-length"];
     const headerLen = headerLenRaw ? parseInt(headerLenRaw, 10) : NaN;

@@ -38,6 +38,8 @@ pnpm start
 | `SFS_COMMIT_BATCH_URL`              | No       | `${SFS_INTERNAL_URL}/internal/blossom/commit-batch` | Internal SmartFlow commit endpoint.                                                                                            |
 | `SFS_COMMIT_BATCH_SIZE`             | No       | `20`                                                | Buffered commit flush threshold (items).                                                                                       |
 | `SFS_COMMIT_FLUSH_MS`               | No       | `2000`                                              | Buffered commit flush interval (milliseconds).                                                                                 |
+| `SFS_POLICY_URL`                    | No       | `${SFS_INTERNAL_URL}/internal/blossom/policy`       | Internal SmartFlow policy endpoint for compatibility lane plan gating.                                                         |
+| `SFS_POLICY_CACHE_TTL_SEC`          | No       | `90`                                                | In-memory cache TTL (seconds) for compat policy lookups.                                                                       |
 | `SFS_COMPAT_MODE_ENABLED`           | No       | `true`                                              | Allow compatibility uploads with Blossom auth and no `X-SFS-Upload-Token` (non-authoritative lane).                            |
 | `SFS_COMPAT_MAX_UPLOAD_BYTES`       | No       | `52428800`                                          | Max bytes accepted by compatibility lane (`50MB`, hard-capped by server max).                                                  |
 | `RATE_LIMIT_UPLOADS_BURST`          | No       | `20`                                                | Uploads token-bucket burst per pubkey.                                                                                         |
@@ -93,8 +95,10 @@ If you use Nginx or similar, increase the max body size (e.g. 250MB) so large up
     validated, upload is streamed + SHA-256 verified, object stored to R2, commit buffered to
     SmartFlow `/internal/blossom/commit-batch`, quota/accounting authoritative.
   - **Compatibility lane**: no token, valid Blossom auth required; upload is accepted under stricter
-    compat limits and persisted as non-authoritative compat metadata. Response includes `url`,
-    `sha256`, `x`, `size`, `type`, `m`.
+    compat limits, internal plan policy gate, and persisted as non-authoritative compat metadata.
+    Free/inactive users are denied with `subscription_required`; policy lookup failures are
+    fail-closed with `service_unavailable`. Response includes `url`, `sha256`, `x`, `size`, `type`,
+    `m`.
 - **HEAD /:key** — Returns 200 with `Content-Type` and `Content-Length` if the blob exists, 404
   otherwise. No auth.
 - **DELETE /:key** — Blossom auth required; `t` tag must be `delete`; only the owning pubkey can

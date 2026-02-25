@@ -90,6 +90,10 @@ async function flushInternal(app: AppInstance): Promise<void> {
       for (const [batchId, items] of grouped.entries()) {
         const result = await sendCommitBatch(batchId, items);
         if (!result.ok) {
+          log.warn("Commit-batch flush failed; enqueueing all items", {
+            batchId,
+            count: items.length,
+          });
           for (const item of items) {
             app.db.enqueueUncommitted({
               jti: item.jti,
@@ -106,6 +110,11 @@ async function flushInternal(app: AppInstance): Promise<void> {
 
         if (result.failedJtis.length > 0) {
           const failedSet = new Set(result.failedJtis);
+          log.warn("Commit-batch partial failures; enqueueing failed items", {
+            batchId,
+            failedCount: result.failedJtis.length,
+            totalCount: items.length,
+          });
           for (const item of items) {
             if (!failedSet.has(item.jti)) continue;
             app.db.enqueueUncommitted({
@@ -157,6 +166,9 @@ export function startCommitReconciliation(
     void (async () => {
       app.db.cleanupExpiredJti();
       const pending = app.db.listRetryableUncommitted();
+      log.info("Commit reconciliation tick", {
+        pendingCount: pending.length,
+      });
       if (pending.length === 0) return;
 
       const grouped = new Map<string, typeof pending>();

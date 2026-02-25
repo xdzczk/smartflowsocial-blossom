@@ -78,6 +78,21 @@ describe("PUT /upload", () => {
     });
   });
 
+  it("does not downgrade malformed token into compat mode", async () => {
+    const req = createReq({
+      headers: {
+        "content-type": "image/jpeg",
+        "x-sfs-upload-token": "not.a.valid.jwt",
+        authorization: "Nostr any",
+      },
+    });
+    const res = mockRes();
+    await expect(uploadRoute(req, res as never)).rejects.toMatchObject({
+      code: 401,
+      error: "invalid_token",
+    });
+  });
+
   it("throws 401 when compat auth header is invalid", async () => {
     const req = createReq({
       headers: {

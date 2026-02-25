@@ -46,6 +46,8 @@ export interface Config {
     commitBatchUrl: string;
     commitBatchSize: number;
     commitFlushMs: number;
+    policyUrl: string;
+    policyCacheTtlSec: number;
     compatibilityMode: {
       enabled: boolean;
       maxUploadBytes: number;
@@ -104,6 +106,11 @@ export function loadConfig(): Config {
       ),
       commitBatchSize: optionalInt("SFS_COMMIT_BATCH_SIZE", 20),
       commitFlushMs: optionalInt("SFS_COMMIT_FLUSH_MS", 2000),
+      policyUrl: optionalEnv(
+        "SFS_POLICY_URL",
+        `${optionalEnv("SFS_INTERNAL_URL", "").replace(/\/$/, "")}/internal/blossom/policy`
+      ),
+      policyCacheTtlSec: optionalInt("SFS_POLICY_CACHE_TTL_SEC", 90),
       compatibilityMode: {
         enabled: optionalBool("SFS_COMPAT_MODE_ENABLED", true),
         maxUploadBytes: optionalInt(
