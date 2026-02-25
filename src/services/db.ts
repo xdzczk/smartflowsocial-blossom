@@ -74,6 +74,12 @@ class Database {
     return result.changes > 0;
   }
 
+  /** Internal/admin delete by key only (used by trusted SFS internal API). */
+  deleteBlobByKey(key: string): boolean {
+    const result = this.db.prepare(`DELETE FROM blobs WHERE key = ?`).run(key);
+    return result.changes > 0;
+  }
+
   /** Returns true if the database is open and responsive (for readiness checks). */
   ping(): boolean {
     try {

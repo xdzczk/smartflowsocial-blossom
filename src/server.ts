@@ -12,6 +12,7 @@ import { log } from "./logger.js";
 import deleteRoute from "./routes/delete.js";
 import headRoute from "./routes/head.js";
 import { createHealthRouter } from "./routes/health.js";
+import internalDeleteRoute from "./routes/internal-delete.js";
 import uploadRoute from "./routes/upload.js";
 import authMiddleware from "./services/auth.js";
 import Database from "./services/db.js";
@@ -167,6 +168,7 @@ export async function start(): Promise<void> {
     authMiddleware as unknown as express.RequestHandler,
     asyncHandler(deleteRoute)
   );
+  app.delete("/internal/blob/:key", asyncHandler(internalDeleteRoute));
 
   app.use((_req, res) => {
     res.status(404).send();

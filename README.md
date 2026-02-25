@@ -76,6 +76,8 @@ If you use Nginx or similar, increase the max body size (e.g. 250MB) so large up
   otherwise. No auth.
 - **DELETE /:key** — Blossom auth required; `t` tag must be `delete`; only the owning pubkey can
   delete.
+- **DELETE /internal/blob/:key** — Internal server-to-server delete by key (for SmartFlow app media
+  cleanup). Requires `x-internal-secret` matching `SFS_INTERNAL_SECRET`.
 
 ## License
 
