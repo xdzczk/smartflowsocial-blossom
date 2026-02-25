@@ -55,6 +55,7 @@ export interface Config {
     commitBatchUrl: string;
     commitBatchSize: number;
     commitFlushMs: number;
+    commitMaxAttempts: number;
     policyUrl: string;
     policyCacheTtlSec: number;
     compatibilityMode: {
@@ -62,9 +63,12 @@ export interface Config {
       maxUploadBytes: number;
     };
     readinessMaxPendingCommits: number;
+    readinessMaxDeadLetterCommits: number;
   };
   rateLimit: {
     mode: "local" | "redis";
+    redisUrl: string;
+    redisKeyPrefix: string;
     uploadsBurst: number;
     uploadsPerMin: number;
     bytesBurst: number;
@@ -126,6 +130,7 @@ export function loadConfig(): Config {
       ),
       commitBatchSize: optionalInt("SFS_COMMIT_BATCH_SIZE", 20),
       commitFlushMs: optionalInt("SFS_COMMIT_FLUSH_MS", 2000),
+      commitMaxAttempts: optionalInt("SFS_COMMIT_MAX_ATTEMPTS", 10),
       policyUrl: optionalEnv(
         "SFS_POLICY_URL",
         `${optionalEnv("SFS_INTERNAL_URL", "").replace(/\/$/, "")}/internal/blossom/policy`
@@ -142,9 +147,15 @@ export function loadConfig(): Config {
         "SFS_READINESS_MAX_PENDING_COMMITS",
         1000
       ),
+      readinessMaxDeadLetterCommits: optionalInt(
+        "SFS_READINESS_MAX_DEAD_LETTER_COMMITS",
+        0
+      ),
     },
     rateLimit: {
       mode: optionalRateLimitMode("RATE_LIMIT_MODE", "local"),
+      redisUrl: optionalEnv("RATE_LIMIT_REDIS_URL", ""),
+      redisKeyPrefix: optionalEnv("RATE_LIMIT_REDIS_KEY_PREFIX", "sfs:rl"),
       uploadsBurst: optionalInt("RATE_LIMIT_UPLOADS_BURST", 20),
       uploadsPerMin: optionalInt("RATE_LIMIT_UPLOADS_PER_MIN", 10),
       bytesBurst: optionalInt("RATE_LIMIT_BYTES_BURST", 500 * 1024 * 1024),

@@ -42,6 +42,9 @@ function makeRow(
     url: `https://cdn.test/${id}`,
     attempts,
     nextRetryAt: 0,
+    status: "pending",
+    lastError: null,
+    failedAt: null,
     created: 1,
     updated: 1,
   };
@@ -51,6 +54,7 @@ function makeApp(rows: UncommittedRow[]): {
   app: AppInstance;
   markUncommittedSuccess: ReturnType<typeof vi.fn>;
   markUncommittedFailure: ReturnType<typeof vi.fn>;
+  markUncommittedDeadLetter: ReturnType<typeof vi.fn>;
   listRetryableUncommitted: ReturnType<typeof vi.fn>;
 } {
   const listRetryableUncommitted = vi
@@ -59,16 +63,19 @@ function makeApp(rows: UncommittedRow[]): {
     .mockReturnValueOnce([]);
   const markUncommittedSuccess = vi.fn();
   const markUncommittedFailure = vi.fn();
+  const markUncommittedDeadLetter = vi.fn();
   return {
     app: {
       db: {
         listRetryableUncommitted,
         markUncommittedSuccess,
         markUncommittedFailure,
+        markUncommittedDeadLetter,
       },
     } as unknown as AppInstance,
     markUncommittedSuccess,
     markUncommittedFailure,
+    markUncommittedDeadLetter,
     listRetryableUncommitted,
   };
 }
@@ -93,6 +100,7 @@ describe("commit reconciliation chunking", () => {
     process.env["SFS_INTERNAL_SECRET"] = "internal-secret";
     process.env["SFS_COMMIT_BATCH_URL"] = "https://smartflow.example/commit";
     process.env["SFS_COMMIT_BATCH_SIZE"] = "2";
+    process.env["SFS_COMMIT_MAX_ATTEMPTS"] = "3";
     resetConfig();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
@@ -105,8 +113,12 @@ describe("commit reconciliation chunking", () => {
       json: () => Promise.resolve({ statuses: [] }),
     });
     const rows = [makeRow(1), makeRow(2), makeRow(3), makeRow(4), makeRow(5)];
-    const { app, markUncommittedSuccess, markUncommittedFailure } =
-      makeApp(rows);
+    const {
+      app,
+      markUncommittedSuccess,
+      markUncommittedFailure,
+      markUncommittedDeadLetter,
+    } = makeApp(rows);
 
     await flushCommitBuffer(app);
 
@@ -122,6 +134,7 @@ describe("commit reconciliation chunking", () => {
     expect(thirdBody.items).toHaveLength(1);
     expect(markUncommittedSuccess).toHaveBeenCalledTimes(5);
     expect(markUncommittedFailure).not.toHaveBeenCalled();
+    expect(markUncommittedDeadLetter).not.toHaveBeenCalled();
   });
 
   it("marks only failed JTIs in a partially failed chunk", async () => {
@@ -139,11 +152,12 @@ describe("commit reconciliation chunking", () => {
         status: 200,
         json: () => Promise.resolve({ statuses: [] }),
       });
-    const { app, markUncommittedSuccess, markUncommittedFailure } = makeApp([
-      makeRow(1),
-      makeRow(2),
-      makeRow(3),
-    ]);
+    const {
+      app,
+      markUncommittedSuccess,
+      markUncommittedFailure,
+      markUncommittedDeadLetter,
+    } = makeApp([makeRow(1), makeRow(2), makeRow(3)]);
 
     await flushCommitBuffer(app);
 
@@ -152,6 +166,7 @@ describe("commit reconciliation chunking", () => {
     expect(markUncommittedSuccess).toHaveBeenCalledWith(3);
     expect(markUncommittedFailure).toHaveBeenCalledTimes(1);
     expect(markUncommittedFailure.mock.calls[0]?.[0]).toBe(2);
+    expect(markUncommittedDeadLetter).not.toHaveBeenCalled();
   });
 
   it("marks all rows in a failed chunk for retry", async () => {
@@ -166,11 +181,12 @@ describe("commit reconciliation chunking", () => {
         status: 200,
         json: () => Promise.resolve({ statuses: [] }),
       });
-    const { app, markUncommittedSuccess, markUncommittedFailure } = makeApp([
-      makeRow(1),
-      makeRow(2),
-      makeRow(3),
-    ]);
+    const {
+      app,
+      markUncommittedSuccess,
+      markUncommittedFailure,
+      markUncommittedDeadLetter,
+    } = makeApp([makeRow(1), makeRow(2), makeRow(3)]);
 
     await flushCommitBuffer(app);
 
@@ -179,5 +195,26 @@ describe("commit reconciliation chunking", () => {
     expect(markUncommittedFailure.mock.calls[1]?.[0]).toBe(2);
     expect(markUncommittedSuccess).toHaveBeenCalledTimes(1);
     expect(markUncommittedSuccess).toHaveBeenCalledWith(3);
+    expect(markUncommittedDeadLetter).not.toHaveBeenCalled();
+  });
+
+  it("moves commits to dead-letter when max attempts is reached", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({}),
+    });
+    const { app, markUncommittedFailure, markUncommittedDeadLetter } = makeApp([
+      makeRow(1, "batch-1", 2),
+    ]);
+
+    await flushCommitBuffer(app);
+
+    expect(markUncommittedDeadLetter).toHaveBeenCalledTimes(1);
+    expect(markUncommittedDeadLetter).toHaveBeenCalledWith(
+      1,
+      "upstream_request_failed"
+    );
+    expect(markUncommittedFailure).not.toHaveBeenCalled();
   });
 });

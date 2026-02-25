@@ -3,6 +3,7 @@ import { log } from "../logger.js";
 import type { AppInstance } from "../types.js";
 
 import { fetchJsonWithRetry } from "./http-client.js";
+import { incrementCounter } from "./telemetry.js";
 
 interface CommitItem {
   jti: string;
@@ -60,6 +61,7 @@ async function flushPendingUncommitted(
   app: AppInstance,
   batchSize: number
 ): Promise<number> {
+  const commitMaxAttempts = Math.max(1, loadConfig().sfs.commitMaxAttempts);
   const safeBatchSize = Math.max(1, batchSize);
   const pending = app.db.listRetryableUncommitted(
     Math.floor(Date.now() / 1000),
@@ -94,10 +96,22 @@ async function flushPendingUncommitted(
           app.db.markUncommittedSuccess(row.id);
           continue;
         }
+        const failureReason = result.ok
+          ? "upstream_reported_failed"
+          : "upstream_request_failed";
+        const nextAttempt = row.attempts + 1;
+        if (nextAttempt >= commitMaxAttempts) {
+          app.db.markUncommittedDeadLetter(row.id, failureReason);
+          incrementCounter("gateway_commit_dead_letter_total", {
+            reason: failureReason,
+          });
+          continue;
+        }
         const backoffSec = Math.min(900, Math.max(30, 2 ** (row.attempts + 1)));
         app.db.markUncommittedFailure(
           row.id,
-          Math.floor(Date.now() / 1000) + backoffSec
+          Math.floor(Date.now() / 1000) + backoffSec,
+          failureReason
         );
       }
     }

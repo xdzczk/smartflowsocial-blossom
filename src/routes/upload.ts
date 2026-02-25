@@ -52,7 +52,7 @@ export default async function upload(
         : undefined) ??
       req.ip ??
       "unknown";
-    const ipRate = enforceIpRateLimit(ip);
+    const ipRate = await enforceIpRateLimit(ip);
     if (!ipRate.allowed) {
       throw new ApiError("Too many requests", 429, {
         error: "rate_limited",
@@ -107,8 +107,8 @@ export default async function upload(
       context.expectedSize ?? (hasValidContentLength ? parsedContentLength : 1);
     const rate =
       lane === "authoritative"
-        ? enforcePubkeyRateLimits(context.pubkey, rateBytes)
-        : enforceCompatPubkeyRateLimits(context.pubkey, rateBytes);
+        ? await enforcePubkeyRateLimits(context.pubkey, rateBytes)
+        : await enforceCompatPubkeyRateLimits(context.pubkey, rateBytes);
     if (!rate.allowed) {
       throw new ApiError("Rate limited", 429, {
         error: "rate_limited",
