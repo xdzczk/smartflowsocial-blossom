@@ -37,8 +37,27 @@ function optionalRateLimitMode(
   return defaultValue;
 }
 
+function optionalTrustProxy(name: string): boolean | number | string {
+  const raw = process.env[name]?.trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  if (lower === "true" || lower === "1" || lower === "yes" || lower === "on") {
+    return true;
+  }
+  if (lower === "false" || lower === "0" || lower === "no" || lower === "off") {
+    return false;
+  }
+  const numeric = Number.parseInt(raw, 10);
+  if (!Number.isNaN(numeric) && String(numeric) === raw && numeric >= 0) {
+    return numeric;
+  }
+  return raw;
+}
+
 export interface Config {
   dbPath: string;
+  trustProxy: boolean | number | string;
+  corsAllowedOrigins: string[];
   r2: {
     bucket: string;
     endpoint: string;
@@ -61,6 +80,7 @@ export interface Config {
     compatibilityMode: {
       enabled: boolean;
       maxUploadBytes: number;
+      dailyBytesLimit: number;
     };
     readinessMaxPendingCommits: number;
     readinessMaxDeadLetterCommits: number;
@@ -115,7 +135,12 @@ export function loadConfig(): Config {
       secretAccessKey: r2SecretAccessKey,
     },
     port: optionalInt("PORT", 5050),
-    authToleranceSeconds: optionalInt("AUTH_TOLERANCE_SECONDS", 0),
+    authToleranceSeconds: optionalInt("AUTH_TOLERANCE_SECONDS", 60),
+    trustProxy: optionalTrustProxy("TRUST_PROXY"),
+    corsAllowedOrigins: optionalEnv("CORS_ALLOWED_ORIGINS", "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
     blossomPublicUrl: optionalEnv(
       "BLOSSOM_PUBLIC_URL",
       "https://blossom.smartflow.social"
@@ -141,6 +166,10 @@ export function loadConfig(): Config {
         maxUploadBytes: optionalInt(
           "SFS_COMPAT_MAX_UPLOAD_BYTES",
           50 * 1024 * 1024
+        ),
+        dailyBytesLimit: optionalInt(
+          "SFS_COMPAT_DAILY_BYTES_LIMIT",
+          500 * 1024 * 1024
         ),
       },
       readinessMaxPendingCommits: optionalInt(

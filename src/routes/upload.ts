@@ -5,6 +5,7 @@ import type { Response } from "express";
 import { loadConfig } from "../config.js";
 import { ApiError } from "../errors.js";
 import { log } from "../logger.js";
+import { getClientIp } from "../services/client-ip.js";
 import { enqueueCommitItem } from "../services/commit.js";
 import { getCompatPolicyForPubkey } from "../services/policy.js";
 import {
@@ -27,6 +28,7 @@ import {
 import type { AppRequest } from "../types.js";
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
+const COMPAT_QUOTA_WINDOW_SECONDS = 24 * 60 * 60;
 
 export default async function upload(
   req: AppRequest,
@@ -46,12 +48,7 @@ export default async function upload(
   const bucket = config.r2.bucket;
 
   try {
-    const ip =
-      (typeof req.headers["x-forwarded-for"] === "string"
-        ? req.headers["x-forwarded-for"].split(",")[0]?.trim()
-        : undefined) ??
-      req.ip ??
-      "unknown";
+    const ip = getClientIp(req);
     const ipRate = await enforceIpRateLimit(ip);
     if (!ipRate.allowed) {
       throw new ApiError("Too many requests", 429, {
@@ -83,11 +80,17 @@ export default async function upload(
         requestId: req.id,
       });
       if (compatPolicy.state === "unavailable") {
+        incrementCounter("gateway_compat_precheck_denied_total", {
+          reason: "policy_unavailable",
+        });
         throw new ApiError("Policy service unavailable", 503, {
           error: "service_unavailable",
         });
       }
       if (compatPolicy.state !== "allow") {
+        incrementCounter("gateway_compat_precheck_denied_total", {
+          reason: "subscription_required",
+        });
         throw new ApiError("Subscription required", 403, {
           error: "subscription_required",
         });
@@ -95,11 +98,41 @@ export default async function upload(
       // Compat uploads are harder to pre-authorize, so require a bounded size
       // before streaming if auth did not include an explicit expected size.
       if (context.expectedSize === undefined && !hasValidContentLength) {
+        incrementCounter("gateway_compat_precheck_denied_total", {
+          reason: "unbounded_size",
+        });
         throw new ApiError(
           "Content-Length required for compatibility uploads",
           411,
           { error: "invalid_request" }
         );
+      }
+
+      const requestBytes = Math.max(
+        1,
+        context.expectedSize ??
+          (hasValidContentLength ? parsedContentLength : 0)
+      );
+      const compatDailyBytesLimit = Math.max(
+        0,
+        config.sfs.compatibilityMode.dailyBytesLimit
+      );
+      if (compatDailyBytesLimit > 0) {
+        const windowStart =
+          Math.floor(Date.now() / 1000) - COMPAT_QUOTA_WINDOW_SECONDS;
+        const usage = req.app.db.getCompatUsageSince(
+          context.pubkey,
+          windowStart
+        );
+        if (usage.bytes + requestBytes > compatDailyBytesLimit) {
+          incrementCounter("gateway_compat_precheck_denied_total", {
+            reason: "daily_bytes_limit",
+          });
+          throw new ApiError("Compatibility daily byte quota exceeded", 429, {
+            error: "rate_limited",
+            retryAfter: 60,
+          });
+        }
       }
     }
 

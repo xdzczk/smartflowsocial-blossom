@@ -47,4 +47,43 @@ describe("server", () => {
     );
     expect(allowed).toBe(true);
   });
+
+  it("does not trust spoofed x-forwarded-for for metrics allowlist", async () => {
+    const mod = await import("../src/server");
+    const req = {
+      headers: { "x-forwarded-for": "203.0.113.9" },
+      ip: "10.0.0.2",
+    } as unknown as express.Request;
+    const allowed = mod.isMetricsRequestAllowed(
+      req,
+      "ignored-token",
+      ["203.0.113.9"],
+      "production"
+    );
+    expect(allowed).toBe(false);
+  });
+
+  it("allows request with no origin for CORS checks", async () => {
+    const mod = await import("../src/server");
+    expect(mod.isCorsOriginAllowed(undefined, ["https://app.example"])).toBe(
+      true
+    );
+  });
+
+  it("allows explicit origin in CORS allowlist", async () => {
+    const mod = await import("../src/server");
+    expect(
+      mod.isCorsOriginAllowed("https://app.example", [
+        "https://app.example",
+        "https://admin.example",
+      ])
+    ).toBe(true);
+  });
+
+  it("denies explicit origin outside CORS allowlist", async () => {
+    const mod = await import("../src/server");
+    expect(
+      mod.isCorsOriginAllowed("https://evil.example", ["https://app.example"])
+    ).toBe(false);
+  });
 });

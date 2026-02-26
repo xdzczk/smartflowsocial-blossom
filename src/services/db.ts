@@ -335,6 +335,25 @@ class Database {
       )
       .all(pubkey, limit) as CompatUploadRow[];
   }
+
+  getCompatUsageSince(
+    pubkey: string,
+    createdAfter: number
+  ): { uploads: number; bytes: number } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(1) as uploads, COALESCE(SUM(size), 0) as bytes
+         FROM compat_uploads
+         WHERE pubkey = ? AND created >= ?`
+      )
+      .get(pubkey, createdAfter) as
+      | { uploads?: number; bytes?: number }
+      | undefined;
+    return {
+      uploads: row?.uploads ?? 0,
+      bytes: row?.bytes ?? 0,
+    };
+  }
 }
 
 export default Database;

@@ -15,6 +15,7 @@ import { createHealthRouter } from "./routes/health.js";
 import internalDeleteRoute from "./routes/internal-delete.js";
 import uploadRoute from "./routes/upload.js";
 import authMiddleware from "./services/auth.js";
+import { getClientIp } from "./services/client-ip.js";
 import {
   flushCommitBuffer,
   startCommitReconciliation,
@@ -31,6 +32,14 @@ import {
   setGauge,
 } from "./services/telemetry.js";
 import type { AppInstance, AppRequest } from "./types.js";
+
+export function isCorsOriginAllowed(
+  origin: string | undefined,
+  allowedOrigins: string[]
+): boolean {
+  if (!origin) return true;
+  return allowedOrigins.includes(origin);
+}
 
 function requestIdMiddleware(
   req: express.Request,
@@ -108,12 +117,7 @@ export function isMetricsRequestAllowed(
   metricsAllowlist: string[],
   nodeEnv: string
 ): boolean {
-  const requesterIp =
-    (typeof req.headers["x-forwarded-for"] === "string"
-      ? req.headers["x-forwarded-for"].split(",")[0]?.trim()
-      : undefined) ??
-    req.ip ??
-    "";
+  const requesterIp = getClientIp(req);
   if (metricsAllowlist.length > 0 && metricsAllowlist.includes(requesterIp)) {
     return true;
   }
@@ -136,8 +140,8 @@ export async function start(): Promise<void> {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 
   const app = express() as express.Application & AppInstance;
+  app.set("trust proxy", config.trustProxy);
   app.use(morgan("tiny"));
-  app.use(cors());
   app.use(requestIdMiddleware);
   app.use((req, res, next) => {
     const started = performance.now();
@@ -168,8 +172,17 @@ export async function start(): Promise<void> {
 
   const commitReconcileInterval = startCommitReconciliation(app);
 
-  app.put("/upload", asyncHandler(uploadRoute));
-  app.head("/:key", asyncHandler(headRoute));
+  const publicCors = cors({
+    origin: (origin, callback) => {
+      callback(null, isCorsOriginAllowed(origin, config.corsAllowedOrigins));
+    },
+    methods: ["PUT", "HEAD", "OPTIONS"],
+  });
+
+  app.options("/upload", publicCors);
+  app.options("/:key", publicCors);
+  app.put("/upload", publicCors, asyncHandler(uploadRoute));
+  app.head("/:key", publicCors, asyncHandler(headRoute));
   app.delete(
     "/:key",
     authMiddleware as express.RequestHandler,
