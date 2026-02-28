@@ -86,4 +86,14 @@ describe("server", () => {
       mod.isCorsOriginAllowed("https://evil.example", ["https://app.example"])
     ).toBe(false);
   });
+
+  it("allows explicit origin when CORS allowlist is empty", async () => {
+    const mod = await import("../src/server");
+    expect(mod.isCorsOriginAllowed("https://app.example", [])).toBe(true);
+  });
+
+  it("allows explicit origin when CORS allowlist contains wildcard", async () => {
+    const mod = await import("../src/server");
+    expect(mod.isCorsOriginAllowed("https://app.example", ["*"])).toBe(true);
+  });
 });

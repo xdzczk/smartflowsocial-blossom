@@ -38,6 +38,8 @@ export function isCorsOriginAllowed(
   allowedOrigins: string[]
 ): boolean {
   if (!origin) return true;
+  if (allowedOrigins.length === 0) return true;
+  if (allowedOrigins.includes("*")) return true;
   return allowedOrigins.includes(origin);
 }
 
