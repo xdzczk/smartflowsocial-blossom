@@ -5,6 +5,10 @@ import type { Response } from "express";
 import { loadConfig } from "../config.js";
 import { ApiError } from "../errors.js";
 import { log } from "../logger.js";
+import {
+  getHostedMediaPolicy,
+  mapLegacyRateClassToCommercialPlanType,
+} from "../planPolicy.js";
 import { getClientIp } from "../services/client-ip.js";
 import { enqueueCommitItem } from "../services/commit.js";
 import { getCompatPolicyForPubkey } from "../services/policy.js";
@@ -29,6 +33,12 @@ import type { AppRequest } from "../types.js";
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const COMPAT_QUOTA_WINDOW_SECONDS = 24 * 60 * 60;
+
+function getMonthStartUtcEpochSeconds(date = new Date()): number {
+  return Math.floor(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / 1000
+  );
+}
 
 export default async function upload(
   req: AppRequest,
@@ -131,6 +141,58 @@ export default async function upload(
           throw new ApiError("Compatibility daily byte quota exceeded", 429, {
             error: "rate_limited",
             retryAfter: 60,
+          });
+        }
+      }
+    }
+
+    if (lane === "authoritative") {
+      const commercialPlanType = mapLegacyRateClassToCommercialPlanType(
+        req.uploadToken?.rateClass
+      );
+      const policy = getHostedMediaPolicy(commercialPlanType);
+      if (!policy.canUseSfsBlossomStorage) {
+        throw new ApiError("Plan not allowed", 403, {
+          error: "plan_not_allowed",
+        });
+      }
+      if (policy.maxFileBytes != null) {
+        laneMaxBytes = Math.min(laneMaxBytes, policy.maxFileBytes);
+      }
+
+      const requestBytes =
+        context.expectedSize ??
+        (hasValidContentLength ? parsedContentLength : undefined);
+      if (
+        requestBytes &&
+        policy.maxFileBytes != null &&
+        requestBytes > policy.maxFileBytes
+      ) {
+        throw new ApiError("Payload too large", 413, {
+          error: "payload_too_large",
+        });
+      }
+
+      if (
+        requestBytes &&
+        policy.monthlyStorageBytes != null &&
+        policy.monthlyUploadBytes != null
+      ) {
+        const storedBytes = req.app.db.getStoredBytes(context.pubkey);
+        const monthStart = getMonthStartUtcEpochSeconds();
+        const uploadedBytes = req.app.db.getUploadedBytesSince(
+          context.pubkey,
+          monthStart
+        );
+        const storageAllowed =
+          BigInt(storedBytes) + BigInt(requestBytes) <=
+          policy.monthlyStorageBytes;
+        const uploadAllowed =
+          BigInt(uploadedBytes) + BigInt(requestBytes) <=
+          policy.monthlyUploadBytes;
+        if (!storageAllowed || !uploadAllowed) {
+          throw new ApiError("Quota exceeded", 403, {
+            error: "quota_exceeded",
           });
         }
       }

@@ -68,6 +68,7 @@ class Database {
         created INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_blobs_pubkey ON blobs(pubkey);
+      CREATE INDEX IF NOT EXISTS idx_blobs_pubkey_created ON blobs(pubkey, created);
       CREATE TABLE IF NOT EXISTS used_jti (
         jti TEXT PRIMARY KEY,
         pubkey TEXT NOT NULL,
@@ -152,6 +153,28 @@ class Database {
       )
       .get(key) as BlobRow | undefined;
     return row ?? null;
+  }
+
+  getStoredBytes(pubkey: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(size), 0) as bytes
+         FROM blobs
+         WHERE pubkey = ?`
+      )
+      .get(pubkey) as { bytes?: number } | undefined;
+    return row?.bytes ?? 0;
+  }
+
+  getUploadedBytesSince(pubkey: string, createdAfter: number): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(size), 0) as bytes
+         FROM blobs
+         WHERE pubkey = ? AND created >= ?`
+      )
+      .get(pubkey, createdAfter) as { bytes?: number } | undefined;
+    return row?.bytes ?? 0;
   }
 
   deleteBlob(key: string, pubkey: string): boolean {
