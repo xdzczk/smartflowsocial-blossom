@@ -3,7 +3,7 @@
  *
  * Intent (must stay aligned with SmartFlowSocial app policy):
  * - Free is intentionally excluded from SFS-hosted storage.
- * - Creator is the first hosted-media tier.
+ * - Starter is the first hosted-media tier.
  * - Pro is the operator-grade hosted-media tier.
  * - Founder inherits Pro limits for now.
  * - Teams is intentionally not publicly specified yet; internal behavior is explicit.
@@ -11,6 +11,7 @@
 
 export type CommercialPlanType =
   | "free"
+  | "starter"
   | "creator"
   | "pro"
   | "teams"
@@ -34,6 +35,13 @@ const POLICIES: Record<CommercialPlanType, HostedMediaPolicy> = {
     monthlyUploadBytes: null,
     maxFileBytes: null,
     maxParallelUploadsHint: null,
+  },
+  starter: {
+    canUseSfsBlossomStorage: true,
+    monthlyStorageBytes: BigInt(5 * GB),
+    monthlyUploadBytes: BigInt(20 * GB),
+    maxFileBytes: 50 * MB,
+    maxParallelUploadsHint: 4,
   },
   creator: {
     canUseSfsBlossomStorage: true,
@@ -81,6 +89,8 @@ export function mapLegacyRateClassToCommercialPlanType(
   switch (raw) {
     case "free":
       return "free";
+    case "starter":
+      return "starter";
     case "basic":
       return "creator";
     case "creator":
