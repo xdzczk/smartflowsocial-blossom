@@ -4,7 +4,7 @@
 # or set TARGETPLATFORM=linux/arm64 in Coolify build args.
 
 # --- Builder: produce the app bundle ---
-FROM node:20.11-bookworm-slim AS builder
+FROM node:26.1-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ RUN pnpm build
 
 # --- Production: install deps and native addon for this platform ---
 ARG TARGETPLATFORM=linux/amd64
-FROM --platform=$TARGETPLATFORM node:20.11-bookworm-slim
+FROM --platform=$TARGETPLATFORM node:26.1-bookworm-slim
 
 WORKDIR /app
 
