@@ -3,10 +3,15 @@
 #   docker build --build-arg TARGETPLATFORM=linux/arm64 ...
 # or set TARGETPLATFORM=linux/arm64 in Coolify build args.
 
+# Node 20 image: keep better-sqlite3 on 12.x. Version 13 requires Node 22+.
 # --- Builder: produce the app bundle ---
 FROM node:20.11-bookworm-slim AS builder
 
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 
