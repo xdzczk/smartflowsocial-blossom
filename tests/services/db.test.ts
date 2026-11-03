@@ -1,3 +1,4 @@
+import fs from "fs";
 import os from "os";
 import path from "path";
 
@@ -8,6 +9,7 @@ import Database from "../../src/services/db.js";
 let dbWorks = false;
 try {
   const dir = path.join(os.tmpdir(), `vibe-cdn-db-probe-${Date.now()}`);
+  fs.mkdirSync(dir, { recursive: true });
   const probe = new Database({ dbPath: dir });
   probe.close();
   dbWorks = true;
@@ -24,6 +26,7 @@ describe.skipIf(!dbWorks)("Database", () => {
       os.tmpdir(),
       `vibe-cdn-db-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
+    fs.mkdirSync(dbDir, { recursive: true });
     db = new Database({ dbPath: dbDir });
   });
 
