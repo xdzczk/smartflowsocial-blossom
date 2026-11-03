@@ -1,5 +1,5 @@
 import type { Response, NextFunction } from "express";
-import { verifySignature } from "nostr-tools";
+import { verifyEvent, type Event as NostrEvent } from "nostr-tools";
 
 import { loadConfig } from "../config.js";
 import { ApiError } from "../errors.js";
@@ -27,9 +27,7 @@ export function parseBlossomAuthorizationHeader(authorization: string): {
   const now = Math.floor(Date.now() / 1000);
 
   if (
-    !verifySignature(
-      auth as unknown as Parameters<typeof verifySignature>[0]
-    ) ||
+    !verifyEvent(auth as unknown as NostrEvent) ||
     auth.kind !== 24242 ||
     isNaN(auth.created_at) ||
     auth.created_at > now + authTolerance

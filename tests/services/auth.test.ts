@@ -5,9 +5,9 @@ import { resetConfig } from "../../src/config.js";
 import authMiddleware from "../../src/services/auth.js";
 import type { AppRequest } from "../../src/types.js";
 
-const verifySignatureMock = vi.fn();
+const verifyEventMock = vi.fn();
 vi.mock("nostr-tools", () => ({
-  verifySignature: (payload: unknown) => verifySignatureMock(payload),
+  verifyEvent: (payload: unknown) => verifyEventMock(payload),
 }));
 
 function makeAuthHeader(payload: Record<string, unknown>): string {
@@ -37,7 +37,7 @@ describe("authMiddleware", () => {
   beforeEach(() => {
     process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
     resetConfig();
-    verifySignatureMock.mockReset().mockReturnValue(true);
+    verifyEventMock.mockReset().mockReturnValue(true);
   });
 
   it("calls next(ApiError) when Authorization header is missing", () => {
@@ -67,7 +67,7 @@ describe("authMiddleware", () => {
   });
 
   it("calls next(ApiError) when verifySignature returns false", () => {
-    verifySignatureMock.mockReturnValue(false);
+    verifyEventMock.mockReturnValue(false);
     const now = Math.floor(Date.now() / 1000);
     const req = createMockReq({
       headers: {
