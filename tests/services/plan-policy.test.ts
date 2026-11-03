@@ -13,6 +13,18 @@ describe("plan policy mapping", () => {
   it("keeps basic mapped to creator for legacy compatibility", () => {
     expect(mapLegacyRateClassToCommercialPlanType("basic")).toBe("creator");
   });
+
+  it("maps the remaining legacy rate classes", () => {
+    expect(mapLegacyRateClassToCommercialPlanType(" FREE ")).toBe("free");
+    expect(mapLegacyRateClassToCommercialPlanType("creator")).toBe("creator");
+    expect(mapLegacyRateClassToCommercialPlanType("premium")).toBe("pro");
+    expect(mapLegacyRateClassToCommercialPlanType("pro")).toBe("pro");
+    expect(mapLegacyRateClassToCommercialPlanType("enterprise")).toBe("pro");
+    expect(mapLegacyRateClassToCommercialPlanType("founder")).toBe("founder");
+    expect(mapLegacyRateClassToCommercialPlanType("teams")).toBe("teams");
+    expect(mapLegacyRateClassToCommercialPlanType(undefined)).toBe("free");
+    expect(mapLegacyRateClassToCommercialPlanType("unknown")).toBe("free");
+  });
 });
 
 describe("starter hosted media policy", () => {
