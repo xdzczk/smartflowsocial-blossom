@@ -10,12 +10,7 @@
  */
 
 export type CommercialPlanType =
-  | "free"
-  | "starter"
-  | "creator"
-  | "pro"
-  | "teams"
-  | "founder";
+  "free" | "starter" | "creator" | "pro" | "teams" | "founder";
 
 export interface HostedMediaPolicy {
   canUseSfsBlossomStorage: boolean;

@@ -370,8 +370,7 @@ class Database {
          WHERE pubkey = ? AND created >= ?`
       )
       .get(pubkey, createdAfter) as
-      | { uploads?: number; bytes?: number }
-      | undefined;
+      { uploads?: number; bytes?: number } | undefined;
     return {
       uploads: row?.uploads ?? 0,
       bytes: row?.bytes ?? 0,
