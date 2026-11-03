@@ -12,7 +12,8 @@ export default async function del(
     throw new ApiError("Expected t tag value 'delete'", 401);
   }
 
-  const key = req.params["key"];
+  const keyParam = req.params["key"];
+  const key = typeof keyParam === "string" ? keyParam : "";
   if (!key) {
     throw new ApiError("Missing key", 400);
   }

@@ -15,7 +15,8 @@ export default async function head(
   req: AppRequest,
   res: Response
 ): Promise<void> {
-  const key = req.params["key"];
+  const keyParam = req.params["key"];
+  const key = typeof keyParam === "string" ? keyParam : "";
   if (!key || !isValidBlobKey(key)) {
     throw new ApiError("Missing or invalid key", 400);
   }
