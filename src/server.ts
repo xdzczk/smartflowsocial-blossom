@@ -15,11 +15,16 @@ import { createHealthRouter } from "./routes/health.js";
 import internalDeleteRoute from "./routes/internal-delete.js";
 import uploadRoute from "./routes/upload.js";
 import authMiddleware from "./services/auth.js";
+import { getClientIp } from "./services/client-ip.js";
 import {
   flushCommitBuffer,
   startCommitReconciliation,
 } from "./services/commit.js";
 import Database from "./services/db.js";
+import {
+  initializeRateLimitProvider,
+  shutdownRateLimitProvider,
+} from "./services/rate-limit.js";
 import {
   incrementCounter,
   observeHistogram,
@@ -27,6 +32,16 @@ import {
   setGauge,
 } from "./services/telemetry.js";
 import type { AppInstance, AppRequest } from "./types.js";
+
+export function isCorsOriginAllowed(
+  origin: string | undefined,
+  allowedOrigins: string[]
+): boolean {
+  if (!origin) return true;
+  if (allowedOrigins.length === 0) return true;
+  if (allowedOrigins.includes("*")) return true;
+  return allowedOrigins.includes(origin);
+}
 
 function requestIdMiddleware(
   req: express.Request,
@@ -98,21 +113,22 @@ function asyncHandler(
 const TEMP_DIR = "/tmp/sfs-blossom";
 const SHUTDOWN_FLUSH_TIMEOUT_MS = 8_000;
 
-function isMetricsRequestAllowed(
+export function isMetricsRequestAllowed(
   req: express.Request,
   metricsToken: string,
-  metricsAllowlist: string[]
+  metricsAllowlist: string[],
+  nodeEnv: string
 ): boolean {
-  const requesterIp =
-    (typeof req.headers["x-forwarded-for"] === "string"
-      ? req.headers["x-forwarded-for"].split(",")[0]?.trim()
-      : undefined) ??
-    req.ip ??
-    "";
+  const requesterIp = getClientIp(req);
   if (metricsAllowlist.length > 0 && metricsAllowlist.includes(requesterIp)) {
     return true;
   }
-  if (!metricsToken) return metricsAllowlist.length === 0;
+  if (!metricsToken) {
+    return (
+      metricsAllowlist.length === 0 &&
+      (nodeEnv === "development" || nodeEnv === "test")
+    );
+  }
   const provided = req.headers["x-metrics-token"];
   const token = typeof provided === "string" ? provided : "";
   return token.length > 0 && token === metricsToken;
@@ -121,12 +137,13 @@ function isMetricsRequestAllowed(
 export async function start(): Promise<void> {
   dotenv.config();
   const config = loadConfig();
+  await initializeRateLimitProvider();
 
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 
   const app = express() as express.Application & AppInstance;
+  app.set("trust proxy", config.trustProxy);
   app.use(morgan("tiny"));
-  app.use(cors());
   app.use(requestIdMiddleware);
   app.use((req, res, next) => {
     const started = performance.now();
@@ -157,8 +174,17 @@ export async function start(): Promise<void> {
 
   const commitReconcileInterval = startCommitReconciliation(app);
 
-  app.put("/upload", asyncHandler(uploadRoute));
-  app.head("/:key", asyncHandler(headRoute));
+  const publicCors = cors({
+    origin: (origin, callback) => {
+      callback(null, isCorsOriginAllowed(origin, config.corsAllowedOrigins));
+    },
+    methods: ["PUT", "HEAD", "OPTIONS"],
+  });
+
+  app.options("/upload", publicCors);
+  app.options("/:key", publicCors);
+  app.put("/upload", publicCors, asyncHandler(uploadRoute));
+  app.head("/:key", publicCors, asyncHandler(headRoute));
   app.delete(
     "/:key",
     authMiddleware as express.RequestHandler,
@@ -170,7 +196,8 @@ export async function start(): Promise<void> {
       !isMetricsRequestAllowed(
         req,
         config.observability.metricsToken,
-        config.observability.metricsAllowlist
+        config.observability.metricsAllowlist,
+        config.nodeEnv
       )
     ) {
       res.status(401).json({ message: "Unauthorized metrics access" });
@@ -179,6 +206,10 @@ export async function start(): Promise<void> {
     setGauge(
       "gateway_pending_commits",
       app.db.countRetryableUncommitted(Math.floor(Date.now() / 1000))
+    );
+    setGauge(
+      "gateway_dead_letter_commits",
+      app.db.countDeadLetterUncommitted()
     );
     res.type("text/plain").send(renderMetrics());
   });
@@ -219,9 +250,21 @@ export async function start(): Promise<void> {
         process.exit(1);
         return;
       }
-      app.db.close();
-      log.info("Server closed");
-      process.exit(0);
+      void (async () => {
+        try {
+          await shutdownRateLimitProvider();
+        } catch (shutdownError) {
+          log.warn("Rate-limit provider shutdown failed", {
+            err:
+              shutdownError instanceof Error
+                ? shutdownError.message
+                : String(shutdownError),
+          });
+        }
+        app.db.close();
+        log.info("Server closed");
+        process.exit(0);
+      })();
     });
   }
 

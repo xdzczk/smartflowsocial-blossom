@@ -89,23 +89,28 @@ pnpm test:performance
 
 ### Important Optional Variables
 
-| Variable                            | Default                            | Description                                       |
-| ----------------------------------- | ---------------------------------- | ------------------------------------------------- |
-| `PORT`                              | `5050`                             | HTTP listen port.                                 |
-| `AUTH_TOLERANCE_SECONDS`            | `0`                                | Allowed auth clock skew in seconds.               |
-| `BLOSSOM_PUBLIC_URL`                | `https://blossom.smartflow.social` | Base URL returned in upload responses.            |
-| `SFS_INTERNAL_URL`                  | empty                              | Base URL for internal SmartFlow callbacks.        |
-| `SFS_INTERNAL_SECRET`               | empty                              | Shared secret for internal endpoints.             |
-| `SFS_COMMIT_BATCH_URL`              | derived                            | Commit callback endpoint.                         |
-| `SFS_POLICY_URL`                    | derived                            | Compatibility policy endpoint.                    |
-| `SFS_POLICY_CACHE_TTL_SEC`          | `90`                               | Compat policy cache TTL seconds.                  |
-| `SFS_COMPAT_MODE_ENABLED`           | `true`                             | Enable compatibility upload lane.                 |
-| `SFS_COMPAT_MAX_UPLOAD_BYTES`       | `52428800`                         | Max bytes for compat lane (50MB default).         |
-| `SFS_READINESS_MAX_PENDING_COMMITS` | `1000`                             | Readiness threshold for retryable commit backlog. |
-| `RATE_LIMIT_*`                      | varies                             | Upload/IP/byte token-bucket limits.               |
-| `METRICS_TOKEN`                     | empty                              | Token gate for `/metrics` access.                 |
-| `METRICS_ALLOWLIST`                 | empty                              | Comma-separated IP allowlist for `/metrics`.      |
-| `NATIVE_BINDINGS_PATH`              | empty                              | Optional path to better-sqlite3 native bindings.  |
+| Variable                                | Default                            | Description                                       |
+| --------------------------------------- | ---------------------------------- | ------------------------------------------------- |
+| `PORT`                                  | `5050`                             | HTTP listen port.                                 |
+| `AUTH_TOLERANCE_SECONDS`                | `0`                                | Allowed auth clock skew in seconds.               |
+| `BLOSSOM_PUBLIC_URL`                    | `https://blossom.smartflow.social` | Base URL returned in upload responses.            |
+| `SFS_INTERNAL_URL`                      | empty                              | Base URL for internal SmartFlow callbacks.        |
+| `SFS_INTERNAL_SECRET`                   | empty                              | Shared secret for internal endpoints.             |
+| `SFS_COMMIT_BATCH_URL`                  | derived                            | Commit callback endpoint.                         |
+| `SFS_COMMIT_MAX_ATTEMPTS`               | `10`                               | Max retries before dead-lettering failed commits. |
+| `SFS_POLICY_URL`                        | derived                            | Compatibility policy endpoint.                    |
+| `SFS_POLICY_CACHE_TTL_SEC`              | `90`                               | Compat policy cache TTL seconds.                  |
+| `SFS_COMPAT_MODE_ENABLED`               | `true`                             | Enable compatibility upload lane.                 |
+| `SFS_COMPAT_MAX_UPLOAD_BYTES`           | `52428800`                         | Max bytes for compat lane (50MB default).         |
+| `SFS_READINESS_MAX_PENDING_COMMITS`     | `1000`                             | Readiness threshold for retryable commit backlog. |
+| `SFS_READINESS_MAX_DEAD_LETTER_COMMITS` | `0`                                | Readiness threshold for dead-lettered commits.    |
+| `RATE_LIMIT_MODE`                       | `local`                            | `local` (in-process) or `redis` (distributed).    |
+| `RATE_LIMIT_REDIS_URL`                  | empty                              | Redis URL used when `RATE_LIMIT_MODE=redis`.      |
+| `RATE_LIMIT_REDIS_KEY_PREFIX`           | `sfs:rl`                           | Prefix for Redis rate-limit keys.                 |
+| `RATE_LIMIT_*`                          | varies                             | Upload/IP/byte token-bucket limits.               |
+| `METRICS_TOKEN`                         | empty                              | Token gate for `/metrics` access.                 |
+| `METRICS_ALLOWLIST`                     | empty                              | Comma-separated IP allowlist for `/metrics`.      |
+| `NATIVE_BINDINGS_PATH`                  | empty                              | Optional path to better-sqlite3 native bindings.  |
 
 See `.env.example` for the full list.
 
@@ -159,7 +164,8 @@ Returns object metadata if present:
 
 - `GET /health` - liveness
 - `GET /ready` - dependency-aware readiness (DB, storage, policy status, backlog)
-- `GET /metrics` - Prometheus-style metrics, protected by token/allowlist
+- `GET /metrics` - Prometheus-style metrics; open by default only in dev/test when no
+  token/allowlist is configured
 
 ## Security Model
 
@@ -167,7 +173,8 @@ Returns object metadata if present:
 - JTI replay protection is persisted in SQLite.
 - Integrity validation includes streamed SHA-256 checks.
 - MIME validation restricts uploads to image/video classes.
-- Metrics endpoint is access-controlled (`METRICS_TOKEN` and/or `METRICS_ALLOWLIST`).
+- Metrics endpoint is deny-by-default in production unless `METRICS_TOKEN` or `METRICS_ALLOWLIST` is
+  set.
 
 More:
 
@@ -178,8 +185,25 @@ More:
 ## Reliability and Operations
 
 - Commit callbacks are retried via durable reconciliation queue.
+- Commits that exceed retry attempts move to dead-letter state for operator action.
 - Graceful shutdown flushes commit state before exit (with timeout guard).
 - Readiness reflects operational dependency health, not process liveness only.
+- Reconciliation commit payloads are chunked by `SFS_COMMIT_BATCH_SIZE` per `batchId`.
+
+## Deployment Notes
+
+- `RATE_LIMIT_MODE=local` uses in-memory token buckets and is per-instance.
+- If running multiple gateway instances, use upstream global throttling (WAF/LB/API gateway) for
+  hard limits.
+- `RATE_LIMIT_MODE=redis` requires `RATE_LIMIT_REDIS_URL`; startup fails fast if missing or
+  unreachable.
+
+## Active Runtime Surface
+
+- Production build/serve path is `src/index.ts` -> `src/server.ts` -> `build/index.js`.
+- Root-level legacy files (for example `index.ts`, `routes/*`, `listener/*`, `exchange/*`) are not
+  part of the current production entrypoint.
+- Prefer making gateway changes under `src/` and `tests/`.
 
 Runbooks and SLOs:
 

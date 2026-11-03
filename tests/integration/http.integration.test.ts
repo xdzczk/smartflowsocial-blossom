@@ -12,11 +12,16 @@ function makeTestApp(dbHealthy = true) {
   const app = express();
   (
     app as unknown as {
-      db: { ping: () => boolean; countRetryableUncommitted: () => number };
+      db: {
+        ping: () => boolean;
+        countRetryableUncommitted: () => number;
+        countDeadLetterUncommitted: () => number;
+      };
     }
   ).db = {
     ping: () => dbHealthy,
     countRetryableUncommitted: () => 0,
+    countDeadLetterUncommitted: () => 0,
   };
   app.use(createHealthRouter(app as never));
   app.put("/upload", (req, res, next) => {

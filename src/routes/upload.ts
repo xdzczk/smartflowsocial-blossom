@@ -5,6 +5,11 @@ import type { Response } from "express";
 import { loadConfig } from "../config.js";
 import { ApiError } from "../errors.js";
 import { log } from "../logger.js";
+import {
+  getHostedMediaPolicy,
+  mapLegacyRateClassToCommercialPlanType,
+} from "../planPolicy.js";
+import { getClientIp } from "../services/client-ip.js";
 import { enqueueCommitItem } from "../services/commit.js";
 import { getCompatPolicyForPubkey } from "../services/policy.js";
 import {
@@ -27,6 +32,13 @@ import {
 import type { AppRequest } from "../types.js";
 
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
+const COMPAT_QUOTA_WINDOW_SECONDS = 24 * 60 * 60;
+
+function getMonthStartUtcEpochSeconds(date = new Date()): number {
+  return Math.floor(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / 1000
+  );
+}
 
 export default async function upload(
   req: AppRequest,
@@ -46,13 +58,8 @@ export default async function upload(
   const bucket = config.r2.bucket;
 
   try {
-    const ip =
-      (typeof req.headers["x-forwarded-for"] === "string"
-        ? req.headers["x-forwarded-for"].split(",")[0]?.trim()
-        : undefined) ??
-      req.ip ??
-      "unknown";
-    const ipRate = enforceIpRateLimit(ip);
+    const ip = getClientIp(req);
+    const ipRate = await enforceIpRateLimit(ip);
     if (!ipRate.allowed) {
       throw new ApiError("Too many requests", 429, {
         error: "rate_limited",
@@ -71,32 +78,132 @@ export default async function upload(
       lane,
       config.sfs.compatibilityMode.maxUploadBytes
     );
+    const contentLength = req.headers["content-length"];
+    const parsedContentLength = contentLength
+      ? parseInt(contentLength, 10)
+      : NaN;
+    const hasValidContentLength =
+      Number.isFinite(parsedContentLength) && parsedContentLength > 0;
 
     if (lane === "compat") {
       const compatPolicy = await getCompatPolicyForPubkey(context.pubkey, {
         requestId: req.id,
       });
       if (compatPolicy.state === "unavailable") {
+        incrementCounter("gateway_compat_precheck_denied_total", {
+          reason: "policy_unavailable",
+        });
         throw new ApiError("Policy service unavailable", 503, {
           error: "service_unavailable",
         });
       }
       if (compatPolicy.state !== "allow") {
+        incrementCounter("gateway_compat_precheck_denied_total", {
+          reason: "subscription_required",
+        });
         throw new ApiError("Subscription required", 403, {
           error: "subscription_required",
         });
       }
+      // Compat uploads are harder to pre-authorize, so require a bounded size
+      // before streaming if auth did not include an explicit expected size.
+      if (context.expectedSize === undefined && !hasValidContentLength) {
+        incrementCounter("gateway_compat_precheck_denied_total", {
+          reason: "unbounded_size",
+        });
+        throw new ApiError(
+          "Content-Length required for compatibility uploads",
+          411,
+          { error: "invalid_request" }
+        );
+      }
+
+      const requestBytes = Math.max(
+        1,
+        context.expectedSize ??
+          (hasValidContentLength ? parsedContentLength : 0)
+      );
+      const compatDailyBytesLimit = Math.max(
+        0,
+        config.sfs.compatibilityMode.dailyBytesLimit
+      );
+      if (compatDailyBytesLimit > 0) {
+        const windowStart =
+          Math.floor(Date.now() / 1000) - COMPAT_QUOTA_WINDOW_SECONDS;
+        const usage = req.app.db.getCompatUsageSince(
+          context.pubkey,
+          windowStart
+        );
+        if (usage.bytes + requestBytes > compatDailyBytesLimit) {
+          incrementCounter("gateway_compat_precheck_denied_total", {
+            reason: "daily_bytes_limit",
+          });
+          throw new ApiError("Compatibility daily byte quota exceeded", 429, {
+            error: "rate_limited",
+            retryAfter: 60,
+          });
+        }
+      }
     }
 
-    const headerLenRaw = req.headers["content-length"];
-    const headerLen = headerLenRaw ? parseInt(headerLenRaw, 10) : NaN;
+    if (lane === "authoritative") {
+      const commercialPlanType = mapLegacyRateClassToCommercialPlanType(
+        req.uploadToken?.rateClass
+      );
+      const policy = getHostedMediaPolicy(commercialPlanType);
+      if (!policy.canUseSfsBlossomStorage) {
+        throw new ApiError("Plan not allowed", 403, {
+          error: "plan_not_allowed",
+        });
+      }
+      if (policy.maxFileBytes != null) {
+        laneMaxBytes = Math.min(laneMaxBytes, policy.maxFileBytes);
+      }
+
+      const requestBytes =
+        context.expectedSize ??
+        (hasValidContentLength ? parsedContentLength : undefined);
+      if (
+        requestBytes &&
+        policy.maxFileBytes != null &&
+        requestBytes > policy.maxFileBytes
+      ) {
+        throw new ApiError("Payload too large", 413, {
+          error: "payload_too_large",
+        });
+      }
+
+      if (
+        requestBytes &&
+        policy.monthlyStorageBytes != null &&
+        policy.monthlyUploadBytes != null
+      ) {
+        const storedBytes = req.app.db.getStoredBytes(context.pubkey);
+        const monthStart = getMonthStartUtcEpochSeconds();
+        const uploadedBytes = req.app.db.getUploadedBytesSince(
+          context.pubkey,
+          monthStart
+        );
+        const storageAllowed =
+          BigInt(storedBytes) + BigInt(requestBytes) <=
+          policy.monthlyStorageBytes;
+        const uploadAllowed =
+          BigInt(uploadedBytes) + BigInt(requestBytes) <=
+          policy.monthlyUploadBytes;
+        if (!storageAllowed || !uploadAllowed) {
+          throw new ApiError("Quota exceeded", 403, {
+            error: "quota_exceeded",
+          });
+        }
+      }
+    }
+
     const rateBytes =
-      context.expectedSize ??
-      (Number.isFinite(headerLen) && headerLen > 0 ? headerLen : 1);
+      context.expectedSize ?? (hasValidContentLength ? parsedContentLength : 1);
     const rate =
       lane === "authoritative"
-        ? enforcePubkeyRateLimits(context.pubkey, rateBytes)
-        : enforceCompatPubkeyRateLimits(context.pubkey, rateBytes);
+        ? await enforcePubkeyRateLimits(context.pubkey, rateBytes)
+        : await enforceCompatPubkeyRateLimits(context.pubkey, rateBytes);
     if (!rate.allowed) {
       throw new ApiError("Rate limited", 429, {
         error: "rate_limited",
@@ -117,9 +224,8 @@ export default async function upload(
       }
     }
 
-    const contentLength = req.headers["content-length"];
     if (contentLength) {
-      const len = parseInt(contentLength, 10);
+      const len = parsedContentLength;
       if (!isNaN(len) && len > laneMaxBytes) {
         throw new ApiError("Payload too large", 413, {
           error: "payload_too_large",

@@ -20,6 +20,7 @@ export function createHealthRouter(
         db: app.db.ping(),
         storage: false,
         pendingCommits: app.db.countRetryableUncommitted(),
+        deadLetterCommits: app.db.countDeadLetterUncommitted(),
         policy: "not_configured",
       };
 
@@ -50,10 +51,12 @@ export function createHealthRouter(
       }
 
       const pendingCommits = checks["pendingCommits"] as number;
+      const deadLetterCommits = checks["deadLetterCommits"] as number;
       const ready =
         checks["db"] === true &&
         checks["storage"] === true &&
         pendingCommits <= config.sfs.readinessMaxPendingCommits &&
+        deadLetterCommits <= config.sfs.readinessMaxDeadLetterCommits &&
         checks["policy"] !== "unavailable";
 
       if (ready) {

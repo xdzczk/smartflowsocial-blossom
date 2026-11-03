@@ -65,6 +65,7 @@
     "@types/node": "^20.11.0",
     "@typescript-eslint/eslint-plugin": "^8.52.0",
     "@typescript-eslint/parser": "^8.52.0",
+    "@vitest/coverage-v8": "^4.0.16",
     "cross-env": "^10.1.0",
     "esbuild": "^0.27.2",
     "eslint": "^9.39.2",
@@ -73,18 +74,17 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-no-secrets": "^2.2.1",
     "eslint-plugin-promise": "^7.2.1",
-    "globals": "^17.0.0",
+    "globals": "^17.4.0",
     "husky": "^9.1.7",
-    "lint-staged": "^16.2.7",
-    "prettier": "3.7.4",
+    "lint-staged": "^17.6.0",
+    "prettier": "3.9.10",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vite-tsconfig-paths": "^6.0.3",
-    "vitest": "^4.0.16",
-    "@vitest/coverage-v8": "^4.0.16"
+    "vitest": "^4.0.16"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.529.1",
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@aws-sdk/lib-storage": "^3.529.1",
     "better-sqlite3": "^9.4.3",
     "cors": "^2.8.5",
@@ -93,6 +93,7 @@
     "file-type": "^19.0.0",
     "mime": "^4.0.4",
     "morgan": "^1.10.0",
-    "nostr-tools": "^1.17.0"
+    "nostr-tools": "^1.17.0",
+    "redis": "^5.11.0"
   }
 }

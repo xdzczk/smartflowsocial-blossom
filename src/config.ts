@@ -28,8 +28,36 @@ function optionalBool(name: string, defaultValue: boolean): boolean {
   return defaultValue;
 }
 
+function optionalRateLimitMode(
+  name: string,
+  defaultValue: "local" | "redis"
+): "local" | "redis" {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (raw === "local" || raw === "redis") return raw;
+  return defaultValue;
+}
+
+function optionalTrustProxy(name: string): boolean | number | string {
+  const raw = process.env[name]?.trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  if (lower === "true" || lower === "1" || lower === "yes" || lower === "on") {
+    return true;
+  }
+  if (lower === "false" || lower === "0" || lower === "no" || lower === "off") {
+    return false;
+  }
+  const numeric = Number.parseInt(raw, 10);
+  if (!Number.isNaN(numeric) && String(numeric) === raw && numeric >= 0) {
+    return numeric;
+  }
+  return raw;
+}
+
 export interface Config {
   dbPath: string;
+  trustProxy: boolean | number | string;
+  corsAllowedOrigins: string[];
   r2: {
     bucket: string;
     endpoint: string;
@@ -46,15 +74,21 @@ export interface Config {
     commitBatchUrl: string;
     commitBatchSize: number;
     commitFlushMs: number;
+    commitMaxAttempts: number;
     policyUrl: string;
     policyCacheTtlSec: number;
     compatibilityMode: {
       enabled: boolean;
       maxUploadBytes: number;
+      dailyBytesLimit: number;
     };
     readinessMaxPendingCommits: number;
+    readinessMaxDeadLetterCommits: number;
   };
   rateLimit: {
+    mode: "local" | "redis";
+    redisUrl: string;
+    redisKeyPrefix: string;
     uploadsBurst: number;
     uploadsPerMin: number;
     bytesBurst: number;
@@ -101,7 +135,12 @@ export function loadConfig(): Config {
       secretAccessKey: r2SecretAccessKey,
     },
     port: optionalInt("PORT", 5050),
-    authToleranceSeconds: optionalInt("AUTH_TOLERANCE_SECONDS", 0),
+    authToleranceSeconds: optionalInt("AUTH_TOLERANCE_SECONDS", 60),
+    trustProxy: optionalTrustProxy("TRUST_PROXY"),
+    corsAllowedOrigins: optionalEnv("CORS_ALLOWED_ORIGINS", "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
     blossomPublicUrl: optionalEnv(
       "BLOSSOM_PUBLIC_URL",
       "https://blossom.smartflow.social"
@@ -116,6 +155,7 @@ export function loadConfig(): Config {
       ),
       commitBatchSize: optionalInt("SFS_COMMIT_BATCH_SIZE", 20),
       commitFlushMs: optionalInt("SFS_COMMIT_FLUSH_MS", 2000),
+      commitMaxAttempts: optionalInt("SFS_COMMIT_MAX_ATTEMPTS", 10),
       policyUrl: optionalEnv(
         "SFS_POLICY_URL",
         `${optionalEnv("SFS_INTERNAL_URL", "").replace(/\/$/, "")}/internal/blossom/policy`
@@ -127,13 +167,24 @@ export function loadConfig(): Config {
           "SFS_COMPAT_MAX_UPLOAD_BYTES",
           50 * 1024 * 1024
         ),
+        dailyBytesLimit: optionalInt(
+          "SFS_COMPAT_DAILY_BYTES_LIMIT",
+          500 * 1024 * 1024
+        ),
       },
       readinessMaxPendingCommits: optionalInt(
         "SFS_READINESS_MAX_PENDING_COMMITS",
         1000
       ),
+      readinessMaxDeadLetterCommits: optionalInt(
+        "SFS_READINESS_MAX_DEAD_LETTER_COMMITS",
+        0
+      ),
     },
     rateLimit: {
+      mode: optionalRateLimitMode("RATE_LIMIT_MODE", "local"),
+      redisUrl: optionalEnv("RATE_LIMIT_REDIS_URL", ""),
+      redisKeyPrefix: optionalEnv("RATE_LIMIT_REDIS_KEY_PREFIX", "sfs:rl"),
       uploadsBurst: optionalInt("RATE_LIMIT_UPLOADS_BURST", 20),
       uploadsPerMin: optionalInt("RATE_LIMIT_UPLOADS_PER_MIN", 10),
       bytesBurst: optionalInt("RATE_LIMIT_BYTES_BURST", 500 * 1024 * 1024),

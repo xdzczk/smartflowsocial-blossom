@@ -191,4 +191,54 @@ describe("authMiddleware", () => {
     });
     expect(res.status).not.toHaveBeenCalled();
   });
+
+  it("accepts small future clock skew within tolerance", () => {
+    process.env["AUTH_TOLERANCE_SECONDS"] = "60";
+    resetConfig();
+    const now = Math.floor(Date.now() / 1000);
+    const req = createMockReq({
+      headers: {
+        authorization: makeAuthHeader({
+          kind: 24242,
+          pubkey: "pk",
+          created_at: now + 30,
+          tags: [
+            ["expiration", String(now + 120)],
+            ["t", "upload"],
+          ],
+        }),
+      },
+    });
+    const res = createMockRes();
+    const next = createMockNext();
+    authMiddleware(req, res as never, next as never);
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it("rejects future clock skew beyond tolerance", () => {
+    process.env["AUTH_TOLERANCE_SECONDS"] = "60";
+    resetConfig();
+    const now = Math.floor(Date.now() / 1000);
+    const req = createMockReq({
+      headers: {
+        authorization: makeAuthHeader({
+          kind: 24242,
+          pubkey: "pk",
+          created_at: now + 61,
+          tags: [
+            ["expiration", String(now + 120)],
+            ["t", "upload"],
+          ],
+        }),
+      },
+    });
+    const res = createMockRes();
+    const next = createMockNext();
+    authMiddleware(req, res as never, next as never);
+    expect(next).toHaveBeenCalledWith(expect.any(ApiError));
+    expect(next.mock.calls[0]?.[0]).toMatchObject({
+      message: "Invalid auth",
+      code: 401,
+    });
+  });
 });
