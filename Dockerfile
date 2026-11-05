@@ -6,7 +6,7 @@
 # Node 26 image. better-sqlite3 stays on 12.x because CI still runs Node 20;
 # version 13 requires Node 22+. Node 26 images do not ship Corepack.
 # --- Builder: produce the app bundle ---
-FROM node:26.1-bookworm-slim AS builder
+FROM node:26.13-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -26,7 +26,7 @@ RUN pnpm build
 
 # --- Production: install deps and native addon for this platform ---
 ARG TARGETPLATFORM=linux/amd64
-FROM --platform=$TARGETPLATFORM node:26.1-bookworm-slim
+FROM --platform=$TARGETPLATFORM node:26.13-bookworm-slim
 
 WORKDIR /app
 
