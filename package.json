@@ -64,7 +64,7 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^26.6.6",
     "@typescript-eslint/eslint-plugin": "^8.52.0",
-    "@typescript-eslint/parser": "^8.52.0",
+    "@typescript-eslint/parser": "^8.72.1",
     "@vitest/coverage-v8": "^4.0.16",
     "cross-env": "^10.1.0",
     "esbuild": "^0.28.2",
