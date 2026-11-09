@@ -24,4 +24,4 @@
 ## Code of conduct
 
 This project follows the [SmartFlowSocial Code of Conduct](CODE_OF_CONDUCT.md). Report unacceptable
-behavior to **conduct@smartflow.social**.
+behavior on Nostr at `npub1ckqlguq0htvs3smwy8pl5uwmfas0h208p7p8hs92ghaurgkmzzrsw3vlh0`.
