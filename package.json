@@ -1,5 +1,5 @@
 {
-  "name": "smartflow-blossom-gateway",
+  "name": "smartflowsocial-blossom",
   "type": "module",
   "version": "1.0.0",
   "description": "Blossom media gateway for SmartFlowSocial. Authenticates uploads, stores media in Cloudflare R2, and commits them back to SmartFlowSocial.",

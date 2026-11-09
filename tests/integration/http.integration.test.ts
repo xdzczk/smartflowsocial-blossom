@@ -70,7 +70,7 @@ async function withServer<T>(
 describe("integration http routes", () => {
   beforeEach(() => {
     process.env["SFS_UPLOAD_TOKEN_SECRET"] = "test-secret";
-    process.env["DB_PATH"] = "/tmp/vibe-cdn-integration";
+    process.env["DB_PATH"] = "/tmp/blossom-integration";
     process.env["R2_BUCKET"] = "test-bucket";
     process.env["R2_ENDPOINT"] = "https://test.r2.dev";
     process.env["R2_ACCESS_KEY_ID"] = "test-key";

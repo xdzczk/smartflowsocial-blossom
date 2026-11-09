@@ -4,7 +4,7 @@ import path from "path";
 // Ensure loadConfig() does not exit in tests when required env is read
 process.env["NODE_ENV"] = "test";
 process.env["DB_PATH"] =
-  process.env["DB_PATH"] ?? path.join(os.tmpdir(), "vibe-cdn-test-db");
+  process.env["DB_PATH"] ?? path.join(os.tmpdir(), "blossom-test-db");
 process.env["R2_BUCKET"] = process.env["R2_BUCKET"] ?? "test-bucket";
 process.env["R2_ENDPOINT"] =
   process.env["R2_ENDPOINT"] ?? "https://test.r2.dev";

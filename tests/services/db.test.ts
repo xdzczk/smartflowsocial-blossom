@@ -9,7 +9,7 @@ import Database from "../../src/services/db.js";
 
 let dbWorks = false;
 try {
-  const dir = path.join(os.tmpdir(), `vibe-cdn-db-probe-${Date.now()}`);
+  const dir = path.join(os.tmpdir(), `blossom-db-probe-${Date.now()}`);
   fs.mkdirSync(dir, { recursive: true });
   const probe = new Database({ dbPath: dir });
   probe.close();
@@ -25,7 +25,7 @@ describe.skipIf(!dbWorks)("Database", () => {
   beforeEach(() => {
     dbDir = path.join(
       os.tmpdir(),
-      `vibe-cdn-db-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      `blossom-db-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
     fs.mkdirSync(dbDir, { recursive: true });
     db = new Database({ dbPath: dbDir });
@@ -208,7 +208,7 @@ describe.skipIf(!dbWorks)("Database", () => {
   it("adds missing columns when opening an older schema", () => {
     const legacyDir = path.join(
       os.tmpdir(),
-      `vibe-cdn-legacy-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      `blossom-legacy-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
     fs.mkdirSync(legacyDir, { recursive: true });
     const raw = new Sqlite3(path.join(legacyDir, "blossom.db"));
