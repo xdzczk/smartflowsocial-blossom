@@ -2,7 +2,7 @@
   "name": "smartflow-blossom-gateway",
   "type": "module",
   "version": "1.0.0",
-  "description": "Minimal Blossom-compatible media gateway for SmartFlowSocial (R2, subscription gating)",
+  "description": "Blossom media gateway for SmartFlowSocial. Authenticates uploads, stores media in Cloudflare R2, and commits them back to SmartFlowSocial.",
   "main": "build/index.js",
   "packageManager": "pnpm@10.27.0",
   "pnpm": {
@@ -51,11 +51,16 @@
     "smartflow",
     "r2"
   ],
-  "author": {
-    "name": "Stuart Bowman",
-    "email": "sbowmans@satellite.earth"
+  "author": "SmartFlowSocial",
+  "license": "Unlicense",
+  "homepage": "https://smartflow.social",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xdzczk/smartflowsocial-blossom.git"
   },
-  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/xdzczk/smartflowsocial-blossom/issues"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/better-sqlite3": "^7.6.11",

@@ -20,3 +20,8 @@
 
 - Use concise imperative messages.
 - Document operational/security impact in PR description when relevant.
+
+## Code of conduct
+
+This project follows the [SmartFlowSocial Code of Conduct](CODE_OF_CONDUCT.md). Report unacceptable
+behavior to **conduct@smartflow.social**.
