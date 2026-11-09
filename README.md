@@ -1,10 +1,20 @@
-# SmartFlow Blossom Gateway
+# SmartFlowSocial Blossom
 
-Production-ready, Blossom-compatible media gateway for SmartFlowSocial.
+[![CI](https://github.com/xdzczk/smartflowsocial-blossom/actions/workflows/ci.yml/badge.svg)](https://github.com/xdzczk/smartflowsocial-blossom/actions/workflows/ci.yml)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue)](LICENSE)
+[![Node 20+](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-This service accepts authenticated uploads, validates payload integrity, stores media in Cloudflare
-R2, and synchronizes authoritative upload events to SmartFlow internal services. It also supports a
-compatibility lane for Blossom clients that do not yet provide SmartFlow upload tokens.
+Blossom-compatible media gateway for [SmartFlowSocial](https://smartflow.social). It authenticates
+uploads, verifies blob integrity, stores media in Cloudflare R2, and commits uploads back to
+SmartFlowSocial.
+
+Part of SmartFlowSocial. Related pieces: [app](https://github.com/xdzczk/smartflowsocial),
+[publisher](https://github.com/xdzczk/smartflowsocial-publisher),
+[Blastr](https://github.com/xdzczk/smartflowsocial-blastr),
+[cache worker](https://github.com/xdzczk/smartflowsocial-cache-worker).
+
+It also supports a compatibility lane for Blossom clients that do not yet provide SmartFlow upload
+tokens.
 
 ## Why This Exists
 
@@ -237,4 +247,5 @@ See:
 
 ## License
 
-MIT
+Released into the public domain under the [Unlicense](LICENSE). This project follows the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report security issues through [SECURITY.md](SECURITY.md).

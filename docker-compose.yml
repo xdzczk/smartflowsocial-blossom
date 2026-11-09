@@ -4,9 +4,9 @@ volumes:
   database: {}
 
 services:
-  sateliite-cdn:
+  blossom:
     build: .
-    image: ghcr.io/lovvtide/satellite-cdn
+    image: ghcr.io/xdzczk/smartflowsocial-blossom
     restart: unless-stopped
     environment:
       DB_PATH: /data
